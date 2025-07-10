@@ -4,11 +4,11 @@
 Terminal::Terminal() : row(0), column(0), color(0), buffer(nullptr) {}
 
 uint8_t Terminal::make_color(enum vga_color fg, enum vga_color bg) {
-    return fg | bg << 4;
+    return fg | (bg << 4);
 }
 
 uint16_t Terminal::make_entry(unsigned char uc, uint8_t color) {
-    return (uint16_t)uc | (uint16_t)color << 8;
+    return (uint16_t)uc | ((uint16_t)color << 8);
 }
 
 void Terminal::initialize() {
@@ -16,7 +16,7 @@ void Terminal::initialize() {
     column = 0;
     color = make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     buffer = (uint16_t*)0xB8000;
-    
+
     for (size_t y = 0; y < VGA_HEIGHT; y++) {
         for (size_t x = 0; x < VGA_WIDTH; x++) {
             buffer[y * VGA_WIDTH + x] = make_entry(' ', color);
@@ -29,13 +29,22 @@ void Terminal::putentry_at(char c, uint8_t color, size_t x, size_t y) {
     buffer[index] = make_entry(c, color);
 }
 
-void Terminal::update_cursor()
-{
+void Terminal::put_at(char c, uint8_t color, size_t x, size_t y) {
+    putentry_at(c, color, x, y);
+}
+
+void Terminal::update_cursor() {
     uint16_t pos = row * VGA_WIDTH + column;
     outb(0x3D4, 0x0F);
     outb(0x3D5, (uint8_t)(pos & 0xFF));
     outb(0x3D4, 0x0E);
     outb(0x3D5, (uint8_t)((pos >> 8) & 0xFF));
+}
+
+void Terminal::set_cursor(size_t r, size_t c) {
+    row = r;
+    column = c;
+    update_cursor();
 }
 
 void Terminal::new_line() {
@@ -59,7 +68,7 @@ void Terminal::scroll() {
 }
 
 void Terminal::putchar(char c) {
-    if (c == '\b') {  // Handle backspace
+    if (c == '\b') {
         if (column > 0) {
             column--;
         } else if (row > 0) {
@@ -110,4 +119,13 @@ void Terminal::clear() {
     }
     row = 0;
     column = 0;
+    update_cursor();
+}
+
+size_t Terminal::get_vga_height() const {
+    return VGA_HEIGHT;
+}
+
+size_t Terminal::get_vga_width() const {
+    return VGA_WIDTH;
 }

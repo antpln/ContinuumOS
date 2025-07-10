@@ -27,29 +27,37 @@ class Terminal {
 private:
     static const size_t VGA_WIDTH = 80;
     static const size_t VGA_HEIGHT = 25;
-    
+
     size_t row;
     size_t column;
     uint8_t color;
     uint16_t* buffer;
 
-    
     uint16_t make_entry(unsigned char uc, uint8_t color);
     void putentry_at(char c, uint8_t color, size_t x, size_t y);
     void new_line();
-    void scroll(); // Add this declaration
+    void scroll();
 
 public:
     Terminal();
+
     void initialize();
+    void clear();
+
     void setcolor(uint8_t color);
     void setfull_color(enum vga_color fg, enum vga_color bg);
     void writestring(const char* str);
-    void writeLine(const char *str);
+    void writeLine(const char* str);
     void putchar(char c);
     uint8_t make_color(enum vga_color fg, enum vga_color bg);
-    void clear();
+
     void update_cursor();
+    void set_cursor(size_t r, size_t c);
+
+    void put_at(char c, uint8_t color, size_t x, size_t y);
+
+    size_t get_vga_height() const;
+    size_t get_vga_width() const;
 };
 
 #endif

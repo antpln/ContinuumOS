@@ -24,17 +24,14 @@ typedef struct keyboard_event {
     bool release;
     bool enter;
     bool backspace;
+    bool up_arrow;
+    bool down_arrow;
+    bool left_arrow;
+    bool right_arrow;
 } keyboard_event;
-
 
 void keyboard_install();
 void keyboard_poll();
 char kb_to_ascii(keyboard_event event);
-
-
-
-
-
-
 
 #endif // KEYBOARD_H

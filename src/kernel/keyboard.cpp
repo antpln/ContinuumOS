@@ -2,210 +2,151 @@
 #include "kernel/port_io.h"
 #include "kernel/pic.h"
 #include "kernel/isr.h"
-#include "kernel/keyboard.h" // Include the new header file
-#include "stdio.h"           // Include the new header file
+#include "kernel/keyboard.h"
+#include "stdio.h"
 #include "kernel/shell.h"
-
-
 
 static bool shift_pressed = false;
 static bool caps_lock_active = false;
 
 static uint8_t scancode_to_ascii[128] = {
-    0,
-    0,
-    '1',
-    '2',
-    '3',
-    '4',
-    '5',
-    '6',
-    '7',
-    '8',
-    '9',
-    '0',
-    '-',
-    '=',
-    0,
-    0,
-    'q',
-    'w',
-    'e',
-    'r',
-    't',
-    'y',
-    'u',
-    'i',
-    'o',
-    'p',
-    '[',
-    ']',
-    0,
-    0,
-    'a',
-    's',
-    'd',
-    'f',
-    'g',
-    'h',
-    'j',
-    'k',
-    'l',
-    ';',
-    '\'',
-    '`',
-    0,
-    '\\',
-    'z',
-    'x',
-    'c',
-    'v',
-    'b',
-    'n',
-    'm',
-    ',',
-    '.',
-    '/',
-    0,
-    '*',
-    0,
-    ' ',
+    0,  0,  '1','2','3','4','5','6','7','8','9','0','-','=', 0,  0,
+    'q','w','e','r','t','y','u','i','o','p','[',']','\n', 0,
+    'a','s','d','f','g','h','j','k','l',';','\'','`', 0, '\\',
+    'z','x','c','v','b','n','m',',','.','/', 0,  '*', 0,  ' ',
+    // Remaining entries are unused
 };
 
-char toupper(char c)
-{
-    if (c >= 'a' && c <= 'z')
-    {
-        return c - ('a' - 'A');
-    }
+char toupper(char c) {
+    if (c >= 'a' && c <= 'z') return c - ('a' - 'A');
     return c;
 }
 
 char kb_to_ascii(keyboard_event event) {
-    uint8_t scancode = event.scancode;
-    char ascii = 0;  // Default: no character
+    if (event.scancode >= 128) return 0;
 
-    if (scancode < 128) {
-        ascii = scancode_to_ascii[scancode];
-        if (event.shift || caps_lock_active) {
-            if (ascii >= 'a' && ascii <= 'z') {
-                ascii = toupper(ascii);
-            }
-        }
+    char ascii = scancode_to_ascii[event.scancode];
+    if (event.shift || event.caps_lock) {
+        if (ascii >= 'a' && ascii <= 'z') ascii = toupper(ascii);
     }
     return ascii;
 }
 
-
 keyboard_event read_keyboard() {
-    keyboard_event event;
+    static bool extended = false;
     uint8_t scancode = inb(KBD_DATA_PORT);
-    char ascii = 0;  // Default: no character
-    event.scancode = scancode;
 
-    if (scancode == KBD_SCANCODE_SHIFT_LEFT || scancode == KBD_SCANCODE_SHIFT_RIGHT)
-    {
-        shift_pressed = true;
+    keyboard_event event = {
+        .scancode   = scancode,
+        .shift      = shift_pressed,
+        .caps_lock  = caps_lock_active,
+        .ctrl       = false,
+        .alt        = false,
+        .special    = false,
+        .release    = false,
+        .enter      = false,
+        .backspace  = false,
+        .up_arrow   = false,
+        .down_arrow = false,
+        .left_arrow = false,
+        .right_arrow= false,
+    };
+
+    if (scancode == 0xE0) {
+        extended = true;
+        event.special = true;
+        return event;
     }
-    else if (scancode == (KBD_SCANCODE_SHIFT_LEFT | KBD_SCANCODE_RELEASE) ||
-             scancode == (KBD_SCANCODE_SHIFT_RIGHT | KBD_SCANCODE_RELEASE))
-    {
+
+    if (extended) {
+        switch (scancode) {
+            case 0x48: event.up_arrow    = true; break;
+            case 0x50: event.down_arrow  = true; break;
+            case 0x4B: event.left_arrow  = true; break;
+            case 0x4D: event.right_arrow = true; break;
+        }
+        event.special = true;
+        extended = false;
+    }
+
+    if (scancode == KBD_SCANCODE_SHIFT_LEFT || scancode == KBD_SCANCODE_SHIFT_RIGHT) {
+        shift_pressed = true;
+    } else if (scancode == (KBD_SCANCODE_SHIFT_LEFT | KBD_SCANCODE_RELEASE) ||
+               scancode == (KBD_SCANCODE_SHIFT_RIGHT | KBD_SCANCODE_RELEASE)) {
         shift_pressed = false;
     }
+
     event.shift = shift_pressed;
     event.release = scancode & KBD_SCANCODE_RELEASE;
-    if (scancode == KBD_SCANCODE_CAPS_LOCK)
-    {
+    if (scancode == KBD_SCANCODE_CAPS_LOCK) {
         caps_lock_active = !caps_lock_active;
     }
+    event.caps_lock = caps_lock_active;
     event.enter = scancode == KBD_SCANCODE_ENTER;
     event.backspace = scancode == KBD_SCANCODE_BACKSPACE;
-    event.caps_lock = caps_lock_active;
+
     return event;
 }
 
-void keyboard_callback(registers_t *regs)
-{
+void keyboard_callback(registers_t *regs) {
+    (void)regs; // Unused
     keyboard_event event = read_keyboard();
     shell_handle_key(event);
 }
 
-void wait_for_input_clear()
-{
-    while (inb(0x64) & 2)
-    {
-        // Wait until the input buffer is clear (Bit 1 == 0)
+void wait_for_input_clear() {
+    while (inb(0x64) & 2) { /* wait */ }
+}
+
+void keyboard_flush() {
+    while (inb(0x64) & 1) {
+        inb(0x60); // Discard
     }
 }
 
-void keyboard_flush()
-{
-    while (inb(0x64) & 1)
-    {
-        inb(0x60); // Read and discard data
-    }
-}
-
-
-
-void keyboard_reset()
-{
+void keyboard_reset() {
     wait_for_input_clear();
-    outb(0x64, 0xFF); // Send reset command
-
-    uint8_t response = inb(0x60); // Expect 0xFA (ACK) or 0xAA (Self-test passed)
+    outb(0x64, 0xFF); // Reset command
+    (void)inb(0x60);  // Read ACK or self-test
 }
 
-void keyboard_enable()
-{
+void keyboard_enable() {
     keyboard_reset();
     keyboard_flush();
 
-    // Wait for and acknowledge any pending commands
     wait_for_input_clear();
     outb(0x64, 0xAE); // Enable keyboard interface
     wait_for_input_clear();
-
-    // Send keyboard Enable command
     outb(0x60, 0xF4); // Enable scanning
-    
-    // Wait for and read ACK
-    for(int i = 0; i < 1000; i++) {
-        if(inb(0x64) & 1) {  // Check if there's data to read
+
+    for (int i = 0; i < 1000; ++i) {
+        if (inb(0x64) & 1) {
             uint8_t response = inb(0x60);
             printf("Keyboard response: 0x%x\n", response);
-            if(response == 0xFA) { // ACK
-                return;
-            }
+            if (response == 0xFA) return;
         }
     }
     printf("Warning: No ACK received from keyboard\n");
 }
 
-void keyboard_install()
-{
-    printf("[KB] Enabling keyboard...");
+void keyboard_install() {
+    printf("[KB] Enabling keyboard...\n");
     keyboard_enable();
     register_interrupt_handler(33, keyboard_callback);
     pic_unmask_irq(1);
 }
 
-void keyboard_check_status()
-{
-    uint8_t status = inb(0x64); // Read status from PS/2 controller
-
-    if (status & 0x01)
-    {
+void keyboard_check_status() {
+    uint8_t status = inb(0x64);
+    if (status & 0x01) {
         printf("Output buffer has data!\n");
     }
 }
 
-void keyboard_poll()
-{
-    while (1)
-    {
-        uint8_t status = inb(0x64);
-        if (status & 0x01) read_keyboard();
+void keyboard_poll() {
+    while (1) {
+        if (inb(0x64) & 0x01) {
+            read_keyboard();
+        }
     }
 }
-
