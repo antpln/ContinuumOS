@@ -57,7 +57,7 @@ directories:
 
 $(KERNEL_ELF): $(OBJECTS)
 	$(CXX) -T linker.ld -o $(KERNEL_DEST)/kernel.bin $(LDFLAGS) $(OBJECTS) -lgcc
-# grub-file --is-x86-multiboot $(KERNEL_DEST)/kernel.bin
+	grub-file --is-x86-multiboot $(KERNEL_DEST)/kernel.bin
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
