@@ -9,6 +9,8 @@
 #include <kernel/vga.h>      
 #include <kernel/shell.h>
 #include <kernel/editor.h>
+#include <kernel/blockdev.h>
+#include <kernel/fat32.h>
 
 extern Terminal terminal;
 extern shell_command_t commands[];
@@ -337,20 +339,121 @@ void cmd_edit(const char* args) {
     editor_start(args, shell.cwd);
 }
 
+// List block devices
+void cmd_lsblk(const char* args) {
+    (void)args;
+    blockdev_list_devices();
+}
+
+// Test disk read
+void cmd_disktest(const char* args) {
+    (void)args;
+    printf("Testing disk read...\n");
+    
+    uint8_t buffer[512];
+    int result = blockdev_read(0, 0, 1, buffer);
+    
+    if (result == 0) {
+        printf("Successfully read sector 0:\n");
+        // Print first 64 bytes as hex
+        for (int i = 0; i < 64; i++) {
+            if (i % 16 == 0) printf("\n%04x: ", i);
+            printf("%02x ", buffer[i]);
+        }
+        printf("\n");
+        
+        // Print as text
+        printf("As text: ");
+        for (int i = 0; i < 64; i++) {
+            char c = buffer[i];
+            printf("%c", (c >= 32 && c < 127) ? c : '.');
+        }
+        printf("\n");
+    } else {
+        printf("Failed to read disk: error %d\n", result);
+    }
+}
+
+// Mount FAT32 filesystem
+void cmd_mount_fat32(const char* args) {
+    (void)args;
+    printf("Attempting to mount FAT32 filesystem on device 0...\n");
+    
+    int result = fat32_mount(0);
+    if (result == 0) {
+        printf("FAT32 filesystem mounted successfully!\n");
+    } else {
+        printf("Failed to mount FAT32 filesystem\n");
+    }
+}
+
+// Show FAT32 filesystem info
+void cmd_fat32_info(const char* args) {
+    (void)args;
+    fat32_get_fs_info();
+}
+
+// List FAT32 root directory
+void cmd_fat32_ls(const char* args) {
+    (void)args;
+    printf("Listing FAT32 root directory:\n");
+    fat32_list_directory(2, NULL, 32); // Root cluster is 2
+}
+
+// Read and display FAT32 file
+void cmd_fat32_cat(const char* args) {
+    if (!args || !*args) {
+        printf("Usage: fat32cat <filename>\n");
+        return;
+    }
+    
+    printf("Reading FAT32 file: %s\n", args);
+    
+    // Open file
+    int fd = fat32_open(args);
+    if (fd < 0) {
+        printf("Failed to open file: %s\n", args);
+        return;
+    }
+    
+    // Read file content
+    char buffer[512];
+    int bytes_read = fat32_read(fd, buffer, sizeof(buffer) - 1);
+    
+    if (bytes_read > 0) {
+        buffer[bytes_read] = '\0'; // Null terminate
+        printf("File content (%d bytes):\n", bytes_read);
+        printf("%s\n", buffer);
+    } else if (bytes_read == 0) {
+        printf("File is empty\n");
+    } else {
+        printf("Failed to read file\n");
+    }
+    
+    // Close file
+    fat32_close(fd);
+}
+
 // Command lookup table
 shell_command_t commands[] = {
-    { "help",    cmd_help,    "Show available commands" },
-    { "ls",      cmd_ls,      "List directory contents" },
-    { "cd",      cmd_cd,      "Change directory" },
-    { "cat",     cmd_cat,     "Display file contents" },
-    { "touch",   cmd_touch,   "Create a new file" },
-    { "mkdir",   cmd_mkdir,   "Create a new directory" },
-    { "rm",      cmd_rm,      "Remove a file" },
-    { "rmdir",   cmd_rmdir,   "Remove a directory" },
-    { "echo",    cmd_echo,    "Print text" },
-    { "pwd",     cmd_pwd,     "Print working directory" },
-    { "uptime",  cmd_uptime,  "Show system uptime" },
-    { "history", cmd_history, "Show command history" },
-    { "edit",    cmd_edit,    "Edit a file" },
-    { NULL,      NULL,        NULL }
+    { "help",     cmd_help,     "Show available commands" },
+    { "ls",       cmd_ls,       "List directory contents" },
+    { "cd",       cmd_cd,       "Change directory" },
+    { "cat",      cmd_cat,      "Display file contents" },
+    { "touch",    cmd_touch,    "Create a new file" },
+    { "mkdir",    cmd_mkdir,    "Create a new directory" },
+    { "rm",       cmd_rm,       "Remove a file" },
+    { "rmdir",    cmd_rmdir,    "Remove a directory" },
+    { "echo",     cmd_echo,     "Print text" },
+    { "pwd",      cmd_pwd,      "Print working directory" },
+    { "uptime",   cmd_uptime,   "Show system uptime" },
+    { "history",  cmd_history,  "Show command history" },
+    { "edit",      cmd_edit,      "Edit a file" },
+    { "lsblk",     cmd_lsblk,     "List block devices" },
+    { "disktest",  cmd_disktest,  "Test disk reading" },
+    { "mount",     cmd_mount_fat32, "Mount FAT32 filesystem" },
+    { "fsinfo",    cmd_fat32_info, "Show filesystem info" },
+    { "fat32ls",   cmd_fat32_ls,   "List FAT32 root directory" },
+    { "fat32cat",  cmd_fat32_cat,  "Read and display FAT32 file" },
+    { NULL,        NULL,          NULL }
 };

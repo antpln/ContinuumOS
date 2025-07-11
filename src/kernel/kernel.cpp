@@ -15,6 +15,8 @@
 #include "kernel/tests/memtest.h"
 #include "kernel/tests/pagetest.h"
 #include "kernel/tests/heaptest.h"
+#include "kernel/blockdev.h"
+#include "kernel/fat32.h"
 
 #include "utils.h"
 #include <stdio.h> // Changed back to just stdio.h since include path is set in Makefile
@@ -29,14 +31,8 @@ extern "C"
 
 	void kernel_main(uint32_t multiboot_info)
 	{
-
-		char *ascii_guitar = R"(
-          Q
-         /|\
-       (o\_)=="#
-        \| |\
-       ~H| |/
-            ~)";
+		(void)multiboot_info; // Suppress unused parameter warning
+		
 		terminal.initialize();
 
 		init_gdt(); // sets up GDT and flushes it
@@ -53,6 +49,12 @@ extern "C"
 
 		// Set up heap
 		init_heap();
+
+		// Initialize block devices (IDE, etc.)
+		blockdev_init();
+
+		// Initialize FAT32 support
+		fat32_init();
 
 		// Initialize the RAMFS.
 		fs_init();

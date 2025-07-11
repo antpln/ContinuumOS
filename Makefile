@@ -102,6 +102,9 @@ iso: $(KERNEL_ELF)
 	grub-mkrescue -o kernel.iso isodir
 
 run: $(KERNEL_ELF)
+	$(QEMU) $(QEMU_FLAGS) -hda test_fat32.img
+
+run-nodisk: $(KERNEL_ELF)
 	$(QEMU) $(QEMU_FLAGS)
 
 runiso: iso
@@ -112,6 +115,28 @@ clean:
 	rm -rf isodir
 	rm -f kernel.iso
 	rm -f $(KERNEL_DEST)/kernel.bin
+	rm -f $(KERNEL_DEST)/kernel2.bin
+
+clean-all: clean
+	rm -f test_fat32.img
+
+# Create test FAT32 disk image
+test_fat32.img:
+	@echo "Creating test FAT32 disk image..."
+	dd if=/dev/zero of=test_fat32.img bs=1M count=16
+	printf '\xEB\x58\x90' | dd of=test_fat32.img bs=1 count=3 conv=notrunc
+	printf 'MSWIN4.1' | dd of=test_fat32.img bs=1 seek=3 count=8 conv=notrunc
+	printf '\x00\x02' | dd of=test_fat32.img bs=1 seek=11 count=2 conv=notrunc
+	printf '\x08' | dd of=test_fat32.img bs=1 seek=13 count=1 conv=notrunc
+	printf '\x20\x00' | dd of=test_fat32.img bs=1 seek=14 count=2 conv=notrunc
+	printf '\x02' | dd of=test_fat32.img bs=1 seek=16 count=1 conv=notrunc
+	printf '\x00\x80\x00\x00' | dd of=test_fat32.img bs=1 seek=32 count=4 conv=notrunc
+	printf '\x80\x00\x00\x00' | dd of=test_fat32.img bs=1 seek=36 count=4 conv=notrunc
+	printf '\x02\x00\x00\x00' | dd of=test_fat32.img bs=1 seek=44 count=4 conv=notrunc
+	printf '\x55\xAA' | dd of=test_fat32.img bs=1 seek=510 count=2 conv=notrunc
+	printf '\x46\x41\x54\x33\x32\x52\x45\x41\x44\x4D\x45\x20\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\x11\x00\x00\x00' | dd of=test_fat32.img bs=1 seek=$$((288*512)) count=32 conv=notrunc
+	printf 'Hello from Fat32\x21' | dd of=test_fat32.img bs=1 seek=$$((296*512)) count=17 conv=notrunc
+	@echo "Test FAT32 disk image created successfully"
 
 # Add debug target
 debug:
