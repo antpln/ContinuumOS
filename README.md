@@ -96,7 +96,9 @@ To recreate the test FAT32 disk image:
 make test_fat32.img
 ```
 
-This creates a 16MB FAT32 disk with a test file `FAT32README`.
+This creates a 16MB FAT32 disk with a test file `FAT32README` by copying from the pre-built template `fat32_template.img`.
+
+Note: To rebuild the FAT32 template from scratch, you'll need `mtools` installed.
 
 ## Shell Commands
 
