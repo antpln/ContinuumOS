@@ -1,6 +1,8 @@
 # ContinuumOS
 
-ContinuumOS is a light-weight minimal i686 kernel for training purposes.
+ContinuumOS is a light-weight minimal x86 kernel for training purposes. The
+build system can target other architectures by setting the `ARCH` variable.
+An experimental port for the RISC-V RV64GC ISA is included.
 
 ## Features
 
@@ -23,9 +25,9 @@ ContinuumOS is a light-weight minimal i686 kernel for training purposes.
 
 To build and run ContinuumOS, you will need the following tools:
 
-*   An `i686-elf` cross-compiler toolchain (GCC, G++, AS)
+*   A cross-compiler toolchain for your target architecture (defaults to `i686-elf`)
 *   `make`
-*   `qemu-system-i386`
+*   A QEMU binary for your target (e.g. `qemu-system-i386`)
 *   `grub` (for creating the bootable ISO)
 
 ### Building
@@ -36,7 +38,22 @@ To build the kernel, run the following command:
 make all
 ```
 
+You can override the `ARCH` variable to build for another target, for example:
+
+```sh
+make ARCH=x86_64
+
+# Build the experimental RISC-V port
+make ARCH=riscv64
+```
+
 This will create the kernel binary at `kernel/kernel.bin`.
+
+To build every supported port sequentially, run:
+
+```sh
+make check-ports
+```
 
 ### Running
 
@@ -46,13 +63,19 @@ To run the OS in QEMU:
 make run
 ```
 
+For RISC-V:
+
+```sh
+make ARCH=riscv64 run
+```
+
 To create a bootable ISO image and run it in QEMU:
 
 ```sh
 make runiso
 ```
 
-The ISO image will be created as `kernel.iso`.
+The ISO image will be created as `kernel.iso` (x86 only).
 
 ### Cleaning
 

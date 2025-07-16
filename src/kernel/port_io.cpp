@@ -1,5 +1,6 @@
 #include <kernel/port_io.h>
 
+#if defined(__i386__) || defined(__x86_64__)
 // Output a byte to a specified port
 void outb(uint16_t port, uint8_t value) {
     asm volatile("outb %1, %0" :: "dN"(port), "a"(value));
@@ -24,3 +25,10 @@ void io_wait(void) {
     // it might not be strictly necessary, but it's traditional.
     asm volatile ("outb %%al, $0x80" : : "a"(0));
 }
+#else
+// When building for a non-x86 architecture the port I/O functions are stubs.
+void outb(uint16_t, uint8_t) {}
+uint8_t inb(uint16_t) { return 0; }
+uint16_t inw(uint16_t) { return 0; }
+void io_wait(void) {}
+#endif

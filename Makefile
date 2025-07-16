@@ -1,7 +1,20 @@
 # Cross-compiler setup
-CC = i686-elf-gcc
-CXX = i686-elf-g++
-AS = i686-elf-as
+# Architecture prefix (e.g. i686, x86_64, arm-none-eabi)
+ARCH ?= i686
+# List of available architecture ports that can be built.
+ARCH_LIST ?= i686 riscv64
+CROSS_PREFIX ?= $(ARCH)-elf-
+CC  = $(CROSS_PREFIX)gcc
+CXX = $(CROSS_PREFIX)g++
+AS  = $(CROSS_PREFIX)as
+
+# Architecture-specific compile flags
+ARCH_CFLAGS :=
+ARCH_CXXFLAGS :=
+ifeq ($(ARCH),riscv64)
+ARCH_CFLAGS   = -march=rv64gc -mabi=lp64
+ARCH_CXXFLAGS = -march=rv64gc -mabi=lp64
+endif
 
 # Directories
 SRC_DIR = src
@@ -16,17 +29,26 @@ LIBC_DIR = libc
 $(shell mkdir -p $(KERNEL_DEST))
 
 # Compiler flags
-CFLAGS = -O2 -g -std=gnu99 -ffreestanding -Wall -Wextra -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include
-CXXFLAGS = -O2 -g -ffreestanding -Wall -Wextra -fno-exceptions -fno-rtti -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include 
+CFLAGS = -O2 -g -std=gnu99 -ffreestanding -Wall -Wextra -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include $(ARCH_CFLAGS)
+CXXFLAGS = -O2 -g -ffreestanding -Wall -Wextra -fno-exceptions -fno-rtti -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include $(ARCH_CXXFLAGS)
 LDFLAGS = -ffreestanding -O2 -nostdlib
 
 # Source files
-CSOURCES = $(shell find $(SRC_DIR) -name '*.c')
-CPPSOURCES = $(shell find $(SRC_DIR) -name '*.cpp')
-ASMSOURCES = $(shell find $(BOOT_DIR) -name '*.s')
+ifeq ($(ARCH),riscv64)
+CSOURCES = $(shell find src/riscv -name '*.c')
+CPPSOURCES = $(shell find src/riscv -name '*.cpp')
+ASMSOURCES = $(shell find boot/riscv -name '*.s')
+KERNEL_ASMSOURCES =
+LIBC_CSOURCES =
+LIBC_CPPSOURCES =
+else
+CSOURCES = $(shell find $(SRC_DIR) -path $(SRC_DIR)/riscv -prune -o -name '*.c' -print)
+CPPSOURCES = $(shell find $(SRC_DIR) -path $(SRC_DIR)/riscv -prune -o -name '*.cpp' -print)
+ASMSOURCES = $(shell find $(BOOT_DIR) -path $(BOOT_DIR)/riscv -prune -o -name '*.s' -print)
 KERNEL_ASMSOURCES = $(shell find $(KERNEL_DIR) -name '*.s')
 LIBC_CSOURCES = $(shell find $(LIBC_DIR) -type f -name '*.c')
 LIBC_CPPSOURCES = $(shell find $(LIBC_DIR) -type f -name '*.cpp')
+endif
 
 # Object files
 KERNEL_OBJS = $(patsubst $(KERNEL_DIR)/%.s,$(BUILD_DIR)/kernel/%.o,$(KERNEL_ASMSOURCES))
@@ -42,10 +64,16 @@ OBJECTS = $(sort $(BOOT_OBJS) $(C_OBJS) $(CPP_OBJS) $(KERNEL_OBJS) $(LIBC_C_OBJS
 KERNEL_ELF = kernel/kernel.bin
 
 # QEMU configuration
-QEMU = qemu-system-i386
+QEMU_ARCH ?= i386
+ifeq ($(ARCH),riscv64)
+QEMU_ARCH = riscv64
+QEMU_FLAGS = -machine virt -bios none -kernel $(KERNEL_ELF)
+else
 QEMU_FLAGS = -kernel $(KERNEL_ELF)
+endif
+QEMU = qemu-system-$(QEMU_ARCH)
 
-.PHONY: all clean run directories iso debug runiso
+.PHONY: all clean run directories iso debug runiso check-ports
 
 all: directories $(KERNEL_ELF)
 
@@ -55,9 +83,14 @@ directories:
 	@mkdir -p $(BUILD_DIR)/boot
 	@mkdir -p $(BUILD_DIR)/libc
 
+GRUB_CHECK :=
+ifeq ($(filter $(ARCH),i686 x86_64),$(ARCH))
+GRUB_CHECK := grub-file --is-x86-multiboot $(KERNEL_DEST)/kernel.bin
+endif
+
 $(KERNEL_ELF): $(OBJECTS)
 	$(CXX) -T linker.ld -o $(KERNEL_DEST)/kernel.bin $(LDFLAGS) $(OBJECTS) -lgcc
-	grub-file --is-x86-multiboot $(KERNEL_DEST)/kernel.bin
+	$(GRUB_CHECK)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
@@ -93,13 +126,18 @@ $(BUILD_DIR)/libc/%.o: $(LIBC_DIR)/%.c
 	@echo "Compiling C: $<"
 	$(CC) -c $< -o $@ $(CFLAGS)
 
+ifeq ($(filter $(ARCH),i686 x86_64),$(ARCH))
 iso: $(KERNEL_ELF)
-	mkdir -p isodir/boot/grub
-	cp $(KERNEL_DEST)/kernel.bin isodir/boot/kernel.bin
-	cp grub.cfg isodir/boot/grub/grub.cfg
-	$(CXX) -T linker.ld -o $(KERNEL_DEST)/kernel2.bin $(LDFLAGS) $(OBJECTS) -lgcc
-	cp $(KERNEL_DEST)/kernel2.bin isodir/boot/kernel.bin
-	grub-mkrescue -o kernel.iso isodir
+	       mkdir -p isodir/boot/grub
+	       cp $(KERNEL_DEST)/kernel.bin isodir/boot/kernel.bin
+		       cp grub.cfg isodir/boot/grub/grub.cfg
+		       $(CXX) -T linker.ld -o $(KERNEL_DEST)/kernel2.bin $(LDFLAGS) $(OBJECTS) -lgcc
+	       cp $(KERNEL_DEST)/kernel2.bin isodir/boot/kernel.bin
+	       grub-mkrescue -o kernel.iso isodir
+else
+iso:
+	       @echo "ISO creation not supported for ARCH=$(ARCH)"
+endif
 
 run: $(KERNEL_ELF)
 	$(QEMU) $(QEMU_FLAGS)
@@ -117,4 +155,16 @@ clean:
 debug:
 	$(MAKE) clean
 	$(MAKE) CFLAGS="$(CFLAGS) -O0 -g" ASFLAGS="--32"
-	qemu-system-i386 -S -s -kernel kernel/kernel.bin &
+	$(QEMU) -S -s $(QEMU_FLAGS) &
+
+# Try building every architecture listed in ARCH_LIST
+check-ports:
+	@for arch in $(ARCH_LIST); do \
+	echo "Building for $$arch"; \
+	$(MAKE) clean > /dev/null; \
+	if $(MAKE) ARCH=$$arch all > /dev/null; then \
+	echo "[$$arch] build succeeded"; \
+	else \
+	echo "[$$arch] build failed"; exit 1; \
+	fi; \
+	done
