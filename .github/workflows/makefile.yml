@@ -1,16 +1,45 @@
    name: build
 
-   on:
-     push:
-       branches: [ master ]
-     pull_request:
-       branches: [ master ]
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
 
-   jobs:
-    build:
-      runs-on: ubuntu-latest
-      steps:
-      - name: checkout repo
-        uses: actions/checkout@main
-      - name: build application
-        run: make makeiso
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: checkout repo
+      uses: actions/checkout@main
+    
+    - name: install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential grub-pc-bin xorriso mtools
+        
+    - name: setup cross-compiler
+      run: |
+        # Try to install from package manager first, then fall back to building minimal version
+        sudo apt-get install -y gcc-multilib-i686-linux-gnu g++-multilib-i686-linux-gnu || true
+        
+        # Create symbolic links for the expected compiler names
+        sudo mkdir -p /usr/local/bin
+        
+        # Check if we can use the system cross-compiler as a fallback
+        if command -v i686-linux-gnu-gcc >/dev/null 2>&1; then
+          sudo ln -sf /usr/bin/i686-linux-gnu-gcc /usr/local/bin/i686-elf-gcc
+          sudo ln -sf /usr/bin/i686-linux-gnu-g++ /usr/local/bin/i686-elf-g++
+          sudo ln -sf /usr/bin/i686-linux-gnu-as /usr/local/bin/i686-elf-as
+        else
+          echo "Cross-compiler not available, this will fail"
+          exit 1
+        fi
+        
+    - name: verify cross-compiler
+      run: |
+        which i686-elf-gcc || echo "i686-elf-gcc not found"
+        i686-elf-gcc --version || echo "i686-elf-gcc not working"
+        
+    - name: build application
+      run: make iso
