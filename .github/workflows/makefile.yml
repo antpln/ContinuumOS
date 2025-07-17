@@ -1,45 +1,86 @@
-   name: build
+name: build
 
 on:
   push:
-    branches: [ master ]
+    branches: [ "master" ]
   pull_request:
-    branches: [ master ]
+    branches: [ "master" ]
+
+env:
+  TARGET: i686-elf          # <‑‑ single source of truth
+  GCC_VERSION: "13.2.0"     # bump once a year to keep CVEs away
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-    - name: checkout repo
-      uses: actions/checkout@main
-    
-    - name: install dependencies
+    # 1 – Source code
+    - uses: actions/checkout@v4
+
+    # 2 – Host dependencies (just native libs & Grub tools)
+    - name: Install host packages
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential grub-pc-bin xorriso mtools
-        
-    - name: setup cross-compiler
+        sudo apt-get install -y \
+          build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo \
+          grub-pc-bin xorriso mtools
+
+    # 3 – Cache <workspace>/opt/cross between runs
+    - name: Cache cross‑compiler
+      id: cache-cross
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/opt/cross
+        key: ${{ runner.os }}-gcc-${{ env.GCC_VERSION }}-${{ env.TARGET }}
+
+    # 4 – Only build the toolchain when cache is missing
+    - name: Build ${{ env.TARGET }} GCC ${GCC_VERSION}
+      if: steps.cache-cross.outputs.cache-hit != 'true'
       run: |
-        # Try to install from package manager first, then fall back to building minimal version
-        sudo apt-get install -y gcc-multilib-i686-linux-gnu g++-multilib-i686-linux-gnu || true
-        
-        # Create symbolic links for the expected compiler names
-        sudo mkdir -p /usr/local/bin
-        
-        # Check if we can use the system cross-compiler as a fallback
-        if command -v i686-linux-gnu-gcc >/dev/null 2>&1; then
-          sudo ln -sf /usr/bin/i686-linux-gnu-gcc /usr/local/bin/i686-elf-gcc
-          sudo ln -sf /usr/bin/i686-linux-gnu-g++ /usr/local/bin/i686-elf-g++
-          sudo ln -sf /usr/bin/i686-linux-gnu-as /usr/local/bin/i686-elf-as
-        else
-          echo "Cross-compiler not available, this will fail"
-          exit 1
-        fi
-        
-    - name: verify cross-compiler
+        set -e
+        prefix="$PWD/opt/cross"
+        mkdir -p "$prefix"
+        src="$PWD/src"
+        mkdir -p "$src"
+        cd "$src"
+
+        # Binutils -----------------------------------------------------------
+        wget -q https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.xz
+        tar -xf binutils-2.42.tar.xz
+        mkdir -p build-binutils && cd build-binutils
+        ../binutils-2.42/configure --target=$TARGET --prefix="$prefix" \
+          --with-sysroot --disable-nls --disable-werror
+        make -j$(nproc)
+        make install
+        cd ..
+
+        # GCC ---------------------------------------------------------------
+        wget -q https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.xz
+        tar -xf gcc-${GCC_VERSION}.tar.xz
+        mkdir -p build-gcc && cd build-gcc
+        ../gcc-${GCC_VERSION}/configure --target=$TARGET --prefix="$prefix" \
+          --disable-nls --enable-languages=c,c++ --without-headers
+        make all-gcc -j$(nproc)
+        make all-target-libgcc -j$(nproc)
+        make install-gcc
+        make install-target-libgcc
+
+    # 5 – Expose toolchain to subsequent steps
+    - name: Add cross‑compiler to PATH
+      run: echo "$PWD/opt/cross/bin" >> "$GITHUB_PATH"
+
+    - name: Verify toolchain
       run: |
-        which i686-elf-gcc || echo "i686-elf-gcc not found"
-        i686-elf-gcc --version || echo "i686-elf-gcc not working"
-        
-    - name: build application
+        ${{ env.TARGET }}-gcc --version
+        ${{ env.TARGET }}-ld  --version
+
+    # 6 – Your actual project build
+    - name: Build ISO
       run: make iso
+
+    - name: Upload ISO
+      uses: actions/upload-artifact@v4
+      with:
+        name: continuumos-${{ github.sha }}.iso
+        path: kernel.iso
