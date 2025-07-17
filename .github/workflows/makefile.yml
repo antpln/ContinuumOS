@@ -2,9 +2,10 @@ name: build
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "main" ]
+  workflow_dispatch:        # ← this line enables gh workflow run
 
 env:
   TARGET: i686-elf          # <‑‑ single source of truth
