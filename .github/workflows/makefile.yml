@@ -103,7 +103,7 @@ jobs:
         if: github.event_name == 'push'      # only for real pushes, not PRs
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.sha }}               # full commit SHA as tag
+          tag_name: ${{ steps.vars.outputs.shortsha }}               # full commit SHA as tag
           name:     ${{ steps.vars.outputs.shortsha }}  # release title = short SHA
           generate_release_notes: false            # turn on if you like
           files: continuumos-${{ github.sha }}.iso
