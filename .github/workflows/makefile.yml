@@ -1,87 +1,108 @@
-name: build
+name: build‑and‑release
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main" ]     # every push to main => build + release
   pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:        # ← this line enables gh workflow run
+    branches: [ "main" ]     # still build on PRs, but no release
+  workflow_dispatch:
 
 env:
-  TARGET: i686-elf          # <‑‑ single source of truth
-  GCC_VERSION: "13.2.0"     # bump once a year to keep CVEs away
+  TARGET: i686-elf
+  GCC_VERSION: "13.2.0"
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    # 1 – Source code
-    - uses: actions/checkout@v4
+      # 1 – Source
+      - uses: actions/checkout@v4
 
-    # 2 – Host dependencies (just native libs & Grub tools)
-    - name: Install host packages
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo \
-          grub-pc-bin xorriso mtools
+      # 2 – Host deps
+      - name: Install host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo \
+            grub-pc-bin xorriso mtools
 
-    # 3 – Cache <workspace>/opt/cross between runs
-    - name: Cache cross‑compiler
-      id: cache-cross
-      uses: actions/cache@v4
-      with:
-        path: ${{ github.workspace }}/opt/cross
-        key: ${{ runner.os }}-gcc-${{ env.GCC_VERSION }}-${{ env.TARGET }}
+      # 3 – Cache toolchain
+      - name: Cache cross‑compiler
+        id: cache-cross
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/opt/cross
+          key: ${{ runner.os }}-gcc-${{ env.GCC_VERSION }}-${{ env.TARGET }}
 
-    # 4 – Only build the toolchain when cache is missing
-    - name: Build ${{ env.TARGET }} GCC ${GCC_VERSION}
-      if: steps.cache-cross.outputs.cache-hit != 'true'
-      run: |
-        set -e
-        prefix="$PWD/opt/cross"
-        mkdir -p "$prefix"
-        src="$PWD/src"
-        mkdir -p "$src"
-        cd "$src"
+      # 4 – Build toolchain (only if cache miss)
+      - name: Build ${{ env.TARGET }} GCC ${{ env.GCC_VERSION }}
+        if: steps.cache-cross.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          prefix="$PWD/opt/cross"
+          mkdir -p "$prefix"
+          src="$PWD/src"
+          mkdir -p "$src"
+          cd "$src"
 
-        # Binutils -----------------------------------------------------------
-        wget -q https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.xz
-        tar -xf binutils-2.42.tar.xz
-        mkdir -p build-binutils && cd build-binutils
-        ../binutils-2.42/configure --target=$TARGET --prefix="$prefix" \
-          --with-sysroot --disable-nls --disable-werror
-        make -j$(nproc)
-        make install
-        cd ..
+          # Binutils -----------------------------------------------------------
+          wget -q https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.xz
+          tar -xf binutils-2.42.tar.xz
+          mkdir -p build-binutils && cd build-binutils
+          ../binutils-2.42/configure --target=$TARGET --prefix="$prefix" \
+            --with-sysroot --disable-nls --disable-werror
+          make -j$(nproc)
+          make install
+          cd ..
 
-        # GCC ---------------------------------------------------------------
-        wget -q https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.xz
-        tar -xf gcc-${GCC_VERSION}.tar.xz
-        mkdir -p build-gcc && cd build-gcc
-        ../gcc-${GCC_VERSION}/configure --target=$TARGET --prefix="$prefix" \
-          --disable-nls --enable-languages=c,c++ --without-headers
-        make all-gcc -j$(nproc)
-        make all-target-libgcc -j$(nproc)
-        make install-gcc
-        make install-target-libgcc
+          # GCC ---------------------------------------------------------------
+          wget -q https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.xz
+          tar -xf gcc-${GCC_VERSION}.tar.xz
+          mkdir -p build-gcc && cd build-gcc
+          ../gcc-${GCC_VERSION}/configure --target=$TARGET --prefix="$prefix" \
+            --disable-nls --enable-languages=c,c++ --without-headers
+          make all-gcc -j$(nproc)
+          make all-target-libgcc -j$(nproc)
+          make install-gcc
+          make install-target-libgcc
 
-    # 5 – Expose toolchain to subsequent steps
-    - name: Add cross‑compiler to PATH
-      run: echo "$PWD/opt/cross/bin" >> "$GITHUB_PATH"
+      # 5 – Expose toolchain
+      - name: Add cross‑compiler to PATH
+        run: echo "$PWD/opt/cross/bin" >> "$GITHUB_PATH"
 
-    - name: Verify toolchain
-      run: |
-        ${{ env.TARGET }}-gcc --version
-        ${{ env.TARGET }}-ld  --version
+      - name: Verify toolchain
+        run: |
+          ${{ env.TARGET }}-gcc --version
+          ${{ env.TARGET }}-ld  --version
 
-    # 6 – Your actual project build
-    - name: Build ISO
-      run: make iso
+      # 6 – Build ISO
+      - name: Build ISO
+        run: make iso
 
-    - name: Upload ISO
-      uses: actions/upload-artifact@v4
-      with:
-        name: continuumos-${{ github.sha }}.iso
-        path: kernel.iso
+      # 7 – Package ISO with a predictable name
+      - name: Rename ISO
+        run: mv kernel.iso continuumos-${{ github.sha }}.iso
+
+      # 8 – Upload artifact (useful for PRs / debugging)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: continuumos-${{ github.sha }}.iso
+          path: continuumos-${{ github.sha }}.iso
+
+      # 9 – Capture short commit hash
+      - name: Capture short SHA
+        id: vars
+        run: echo "shortsha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # 10 – Create / update GitHub Release and attach ISO
+      - name: Publish Release with ISO
+        if: github.event_name == 'push'      # only for real pushes, not PRs
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.sha }}               # full commit SHA as tag
+          name:     ${{ steps.vars.outputs.shortsha }}  # release title = short SHA
+          generate_release_notes: false            # turn on if you like
+          files: continuumos-${{ github.sha }}.iso
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
