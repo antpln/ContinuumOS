@@ -20,9 +20,9 @@ CFLAGS = -O2 -g -std=gnu99 -ffreestanding -Wall -Wextra -I$(INCLUDE_DIR) -I$(LIB
 CXXFLAGS = -O2 -g -ffreestanding -Wall -Wextra -fno-exceptions -fno-rtti -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include 
 LDFLAGS = -ffreestanding -O2 -nostdlib
 
-# Source files
-CSOURCES = $(shell find $(SRC_DIR) -name '*.c')
-CPPSOURCES = $(shell find $(SRC_DIR) -name '*.cpp')
+# Source files (exclude toolchain build directories)
+CSOURCES = $(shell find $(SRC_DIR) -name '*.c' ! -path "*/binutils-*" ! -path "*/gcc-*" ! -path "*/build-*")
+CPPSOURCES = $(shell find $(SRC_DIR) -name '*.cpp' ! -path "*/binutils-*" ! -path "*/gcc-*" ! -path "*/build-*")
 ASMSOURCES = $(shell find $(BOOT_DIR) -name '*.s')
 KERNEL_ASMSOURCES = $(shell find $(KERNEL_DIR) -name '*.s')
 LIBC_CSOURCES = $(shell find $(LIBC_DIR) -type f -name '*.c')
