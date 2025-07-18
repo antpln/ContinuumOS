@@ -10,7 +10,10 @@ on:
 env:
   TARGET: i686-elf
   GCC_VERSION: "13.2.0"
-
+permissions:
+  contents: write   # allow creating tags & releases
+  # (optional) If other steps need different scopes, list them here.
+  
 jobs:
   build:
     runs-on: ubuntu-latest
