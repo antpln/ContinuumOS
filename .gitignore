@@ -1,3 +1,10 @@
 *.a
 *.d
 *.o
+
+# Build artifacts
+build/
+isodir/
+kernel.iso
+kernel/kernel.bin
+kernel/kernel2.bin
