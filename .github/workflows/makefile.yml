@@ -85,13 +85,13 @@ jobs:
 
       # 7 – Package ISO with a predictable name
       - name: Rename ISO
-        run: mv kernel.iso continuumos-${{ github.sha }}.iso
+        run: mv kernel.iso continuumos.iso
 
       # 8 – Upload artifact (useful for PRs / debugging)
       - uses: actions/upload-artifact@v4
         with:
-          name: continuumos-${{ github.sha }}.iso
-          path: continuumos-${{ github.sha }}.iso
+          name: continuumos.iso
+          path: continuumos.iso
 
       # 9 – Capture short commit hash
       - name: Capture short SHA
