@@ -106,6 +106,6 @@ jobs:
           tag_name: ${{ steps.vars.outputs.shortsha }}               # full commit SHA as tag
           name:     ${{ steps.vars.outputs.shortsha }}  # release title = short SHA
           generate_release_notes: false            # turn on if you like
-          files: continuumos-${{ github.sha }}.iso
+          files: continuumos.iso
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
