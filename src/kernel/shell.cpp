@@ -9,6 +9,7 @@
 #include <kernel/vga.h>      
 #include <kernel/shell.h>
 #include <kernel/editor.h>
+#include "kernel/memory.h"
 
 extern Terminal terminal;
 extern shell_command_t commands[];
@@ -368,6 +369,15 @@ void cmd_edit(const char* args) {
     editor_start(args, shell.cwd);
 }
 
+// Print memory usage information
+void cmd_meminfo(const char* args) {
+    uint32_t total = PhysicalMemoryManager::get_memory_size();
+    uint32_t free = PhysicalMemoryManager::get_free_frames() * PAGE_SIZE;
+    printf("Total memory: %u bytes\n", total);
+    printf("Free memory:  %u bytes\n", free);
+    printf("Used frames:  %u\n", PhysicalMemoryManager::used_frames);
+}
+
 // Command lookup table
 shell_command_t commands[] = {
     { "help",    cmd_help,    "Show available commands" },
@@ -383,5 +393,6 @@ shell_command_t commands[] = {
     { "uptime",  cmd_uptime,  "Show system uptime" },
     { "history", cmd_history, "Show command history" },
     { "edit",    cmd_edit,    "Edit a file" },
+    { "meminfo", cmd_meminfo, "Show memory usage info" },
     { NULL,      NULL,        NULL }
 };

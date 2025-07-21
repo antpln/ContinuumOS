@@ -44,8 +44,22 @@ static void itoa(int32_t value, char* buffer, int base) {
     buffer[j] = '\0';  // Null-terminate the string
 }
 
-
-
+static void utoa(uint32_t value, char* buffer, int base) {
+    static char digits[] = "0123456789ABCDEF";
+    char temp[32];
+    int i = 0;
+    // Convert the number to string
+    do {
+        temp[i++] = digits[value % base];
+        value /= base;
+    } while (value > 0);
+    // Reverse the string into buffer
+    int j = 0;
+    while (i > 0) {
+        buffer[j++] = temp[--i];
+    }
+    buffer[j] = '\0';
+}
 
 // Convert integer to string (supports base 10 and 16)
 int printf(const char* format, ...) {
@@ -66,7 +80,7 @@ int printf(const char* format, ...) {
                 }
                 case 'u': { // Unsigned Integer
                     unsigned int num = va_arg(args, unsigned int);
-                    itoa((int32_t)num, buffer, 10);
+                    utoa(num, buffer, 10);
                     terminal.writestring(buffer);
                     break;
                 }
@@ -129,7 +143,7 @@ int vprintf(const char* format, va_list args) {
                 }
                 case 'u': {
                     unsigned int num = va_arg(args, unsigned int);
-                    itoa((int32_t)num, buffer, 10);
+                    utoa(num, buffer, 10);
                     terminal.writestring(buffer);
                     break;
                 }

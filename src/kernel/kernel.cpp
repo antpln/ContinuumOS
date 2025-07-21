@@ -12,6 +12,7 @@
 #include "kernel/timer.h"
 #include "kernel/shell.h"
 #include "kernel/ramfs.h"
+#include "kernel/debug.h"
 #include "kernel/tests/memtest.h"
 #include "kernel/tests/pagetest.h"
 #include "kernel/tests/heaptest.h"
@@ -39,6 +40,9 @@ extern "C"
             ~)";
 		terminal.initialize();
 
+		// Initialize the Physical Memory Manager (PMM) before paging
+		PhysicalMemoryManager::initialize(multiboot_info);
+
 		init_gdt(); // sets up GDT and flushes it
 
 		// Remap the PIC
@@ -56,6 +60,26 @@ extern "C"
 
 		// Initialize the RAMFS.
 		fs_init();
+
+		#ifdef TEST
+		MemoryTester mem_tester;
+		if (!mem_tester.test_allocation()) {
+			PANIC("Memory allocation test failed!");
+		} else {
+			success("Memory allocation test passed!");
+		}
+		if (!mem_tester.test_free()) {
+			PANIC("Memory free test failed!");
+		} else {
+			success("Memory free test passed!");
+		}
+		if (!mem_tester.test_multiple_allocations()) {
+			PANIC("Memory multiple allocations test failed!");
+		} else {
+			success("Memory multiple allocations test passed!");
+		}
+		paging_test();
+		#endif
 
 		// Create some built-in files or directories.
 		FSNode *root = fs_get_root();

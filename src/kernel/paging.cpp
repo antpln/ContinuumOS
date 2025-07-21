@@ -3,26 +3,18 @@
 #include <string.h>
 #include "kernel/isr.h"
 #include "kernel/debug.h"
+#include "kernel/memory.h" // For PMM
 
 // Define heap boundaries to avoid conflicts with paging
 #define KERNEL_HEAP_START 0x00800000  // Heap starts at 8 MiB
 #define KERNEL_HEAP_SIZE  0x00800000  // Heap spans 8 MiB (up to 16 MiB)
 
-// Page directory (1024 entries) and four page tables (each 4 MiB)
-static uint32_t kernel_page_directory[1024]
-    __attribute__((aligned(4096), section(".lowmem")));
-
-static uint32_t kernel_page_table0[1024]
-    __attribute__((aligned(4096), section(".lowmem")));
-
-static uint32_t kernel_page_table1[1024]
-    __attribute__((aligned(4096), section(".lowmem")));
-
-static uint32_t kernel_page_table2[1024]
-    __attribute__((aligned(4096), section(".lowmem")));
-
-static uint32_t kernel_page_table3[1024]
-    __attribute__((aligned(4096), section(".lowmem")));
+// Page directory and page tables allocated using PMM
+static uint32_t* kernel_page_directory = nullptr;
+static uint32_t* kernel_page_table0 = nullptr;
+static uint32_t* kernel_page_table1 = nullptr;
+static uint32_t* kernel_page_table2 = nullptr;
+static uint32_t* kernel_page_table3 = nullptr;
 
 // Page fault handler
 void page_fault_handler(registers_t *registers) {
@@ -50,15 +42,21 @@ void vmm_init()
     // Register the page fault handler
     register_interrupt_handler(14, page_fault_handler);
 
-    // 1) Clear the page directory and tables
-    memset(kernel_page_directory, 0, sizeof(kernel_page_directory));
-    memset(kernel_page_table0, 0, sizeof(kernel_page_table0));
-    memset(kernel_page_table1, 0, sizeof(kernel_page_table1));
-    memset(kernel_page_table2, 0, sizeof(kernel_page_table2));
-    memset(kernel_page_table3, 0, sizeof(kernel_page_table3));
+    // Allocate page directory and tables using PMM
+    kernel_page_directory = (uint32_t*)PhysicalMemoryManager::allocate_frame();
+    kernel_page_table0    = (uint32_t*)PhysicalMemoryManager::allocate_frame();
+    kernel_page_table1    = (uint32_t*)PhysicalMemoryManager::allocate_frame();
+    kernel_page_table2    = (uint32_t*)PhysicalMemoryManager::allocate_frame();
+    kernel_page_table3    = (uint32_t*)PhysicalMemoryManager::allocate_frame();
 
-    // 2) Fill the four page tables (0–4MiB, 4–8MiB, 8–12MiB, 12–16MiB)
-    debug("[VMM] Mapping [0..16 MiB]");
+    // Clear the page directory and tables
+    memset(kernel_page_directory, 0, PAGE_SIZE);
+    memset(kernel_page_table0, 0, PAGE_SIZE);
+    memset(kernel_page_table1, 0, PAGE_SIZE);
+    memset(kernel_page_table2, 0, PAGE_SIZE);
+    memset(kernel_page_table3, 0, PAGE_SIZE);
+
+    // Fill the four page tables (0–4MiB, 4–8MiB, 8–12MiB, 12–16MiB)
     uint32_t* tables[] = {kernel_page_table0, kernel_page_table1, kernel_page_table2, kernel_page_table3};
     for (int table_idx = 0; table_idx < 4; table_idx++) {
         for (uint32_t i = 0; i < 1024; i++) {
@@ -67,7 +65,7 @@ void vmm_init()
         }
     }
 
-    // 3) Map the page tables in the directory
+    // Map the page tables in the directory
     kernel_page_directory[0] = ((uint32_t)kernel_page_table0 & 0xFFFFF000) | 0x03;
     kernel_page_directory[1] = ((uint32_t)kernel_page_table1 & 0xFFFFF000) | 0x03;
     kernel_page_directory[2] = ((uint32_t)kernel_page_table2 & 0xFFFFF000) | 0x03;
@@ -78,7 +76,6 @@ void vmm_init()
     debug("[VMM] PDE[2] = 0x%x", kernel_page_directory[2]);
     debug("[VMM] PDE[3] = 0x%x", kernel_page_directory[3]);
 
-    // Print first few entries for debugging
     debug("[VMM] First 4 entries of page_table0:");
     for (int i = 0; i < 4; i++) {
         debug("  PT0[%d] = 0x%x", i, kernel_page_table0[i]);
