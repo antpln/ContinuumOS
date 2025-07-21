@@ -80,6 +80,19 @@ const char* shell_history_prev(void) {
     return shell.history[shell.history_nav % SHELL_HISTORY_SIZE];
 }
 
+// Return the next command from history, or NULL if none
+const char* shell_history_next(void) {
+    if (shell.history_count == 0) return NULL;
+    if (shell.history_nav == -1) return NULL; // Not navigating
+    if (shell.history_nav < (int)shell.history_count - 1)
+        shell.history_nav++;
+    else {
+        shell.history_nav = -1;
+        return ""; // Clear input if at the end
+    }
+    return shell.history[shell.history_nav % SHELL_HISTORY_SIZE];
+}
+
 // Reset history navigation state
 void shell_history_reset(void) {
     shell.history_nav = -1;
@@ -120,6 +133,24 @@ void shell_handle_key(keyboard_event ke) {
             shell.index = strlen(shell.buffer);
             shell_print_prompt();
             printf("%s", shell.buffer);
+        }
+        return;
+    }
+
+    // Down arrow: next history
+    if (ke.down_arrow) {
+        const char* next = shell_history_next();
+        size_t len = SHELL_PROMPT_LEN + shell.index;
+        clear_line(len);
+        if (next && *next) {
+            safe_strncpy(shell.buffer, next, SHELL_BUFFER_SIZE);
+            shell.index = strlen(shell.buffer);
+            shell_print_prompt();
+            printf("%s", shell.buffer);
+        } else {
+            shell.buffer[0] = '\0';
+            shell.index = 0;
+            shell_print_prompt();
         }
         return;
     }
