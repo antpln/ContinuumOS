@@ -55,6 +55,7 @@ directories:
 	@mkdir -p $(BUILD_DIR)/kernel
 	@mkdir -p $(BUILD_DIR)/boot
 	@mkdir -p $(BUILD_DIR)/libc
+	@mkdir -p $(BUILD_DIR)/libc/stdlib
 
 $(KERNEL_ELF): $(OBJECTS)
 	$(CXX) -T linker.ld -o $(KERNEL_DEST)/kernel.bin $(LDFLAGS) $(OBJECTS) -lgcc
