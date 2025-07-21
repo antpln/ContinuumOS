@@ -21,6 +21,8 @@ CXXFLAGS = -O2 -g -ffreestanding -Wall -Wextra -fno-exceptions -fno-rtti -I$(INC
 CXXFLAGS += $(CFLAGS)
 LDFLAGS = -ffreestanding -O2 -nostdlib
 
+CFLAGS += $(EXTRA_CFLAGS)
+
 # Source files (exclude toolchain build directories)
 CSOURCES = $(shell find $(SRC_DIR) -name '*.c' ! -path "*/binutils-*" ! -path "*/gcc-*" ! -path "*/build-*")
 CPPSOURCES = $(shell find $(SRC_DIR) -name '*.cpp' ! -path "*/binutils-*" ! -path "*/gcc-*" ! -path "*/build-*")
