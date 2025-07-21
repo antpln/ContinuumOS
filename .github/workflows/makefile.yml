@@ -82,6 +82,14 @@ jobs:
       # 6 – Build ISO
       - name: Build ISO
         run: make iso CFLAGS="-UDEBUG -UTEST"
+        working-directory: ${{ github.workspace }}
+
+      # 5.4 – Diagnostic: Show working directory and libc/include contents
+      - name: Show working directory and libc/include contents
+        run: |
+          pwd
+          ls -l libc/include
+          ls -l libc/include/stdlib.h
 
       # 5.5 – Prepare build directories
       - name: Prepare build directories
