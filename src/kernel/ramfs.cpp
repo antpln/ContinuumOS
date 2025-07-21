@@ -98,7 +98,7 @@ void fs_init()
     root = fs_create_node("/", FS_DIRECTORY);
     if (root == NULL)
     {
-        error("[RAMFS] Error initializing filesystem: could not allocate root directory.");
+        PANIC("[RAMFS] Error initializing filesystem: could not allocate root directory.");
     }
     else
     {
