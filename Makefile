@@ -16,8 +16,9 @@ LIBC_DIR = libc
 $(shell mkdir -p $(KERNEL_DEST))
 
 # Compiler flags
-CFLAGS = -O2 -g -std=gnu99 -ffreestanding -Wall -Wextra -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include
-CXXFLAGS = -O2 -g -ffreestanding -Wall -Wextra -fno-exceptions -fno-rtti -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include 
+CFLAGS = -O2 -g -std=gnu99 -ffreestanding -Wall -Wextra -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include -DDEBUG -DTEST
+CXXFLAGS = -O2 -g -ffreestanding -Wall -Wextra -fno-exceptions -fno-rtti -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include
+CXXFLAGS += $(CFLAGS)
 LDFLAGS = -ffreestanding -O2 -nostdlib
 
 # Source files (exclude toolchain build directories)

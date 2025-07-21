@@ -3,6 +3,7 @@
 #include "string.h"
 #include "kernel/heap.h"
 #include "string.h"
+#include <kernel/debug.h>
 
 // For dynamic allocation, we assume a kernel allocator is available.
 
@@ -43,7 +44,7 @@ void fs_add_child(FSNode *parent, FSNode *child)
         return;
     if (parent->child_count >= MAX_CHILDREN)
     {
-        printf("Error: directory '%s' is full.\n", parent->name);
+        error("[RAMFS] directory '%s' is full.", parent->name);
         return;
     }
     parent->children[parent->child_count++] = child;
@@ -97,11 +98,11 @@ void fs_init()
     root = fs_create_node("/", FS_DIRECTORY);
     if (root == NULL)
     {
-        printf("Error initializing filesystem: could not allocate root directory.\n");
+        error("[RAMFS] Error initializing filesystem: could not allocate root directory.");
     }
     else
     {
-        printf("[RAMFS] Filesystem initialized.\n");
+        success("[RAMFS] Filesystem initialized.");
     }
 }
 
@@ -142,7 +143,7 @@ int fs_write(FSNode *file, size_t offset, size_t size, const uint8_t *buffer)
         uint8_t *new_data = (uint8_t *)krealloc(file->data, offset + size);
         if (!new_data)
         {
-            printf("Write error: Out of memory for '%s'\n", file->name);
+            printf("Write error: Out of memory for '%s'", file->name);
             return -1;
         }
         file->data = new_data;

@@ -2,6 +2,7 @@
 #include "kernel/port_io.h"
 #include "kernel/isr.h"
 #include <stdio.h>
+#include <kernel/debug.h>
 
 volatile uint32_t timer_ticks = 0;
 
@@ -23,7 +24,7 @@ void init_timer(uint32_t frequency) {
     // Register timer_handler for IRQ0 (interrupt 32).
     register_interrupt_handler(32, timer_handler);
 
-    printf("[TIMER] Timer initialized to %d Hz\n", frequency);
+    success("[TIMER] Timer initialized to %d Hz", frequency);
 }
 
 uint32_t get_ticks() {

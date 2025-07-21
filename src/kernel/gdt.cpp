@@ -1,7 +1,7 @@
 // gdt.cpp
 #include <stdint.h>
 #include "kernel/gdt.h"
-#include <stdio.h>
+#include "kernel/debug.h"
 
 
 // We'll define 5 segments: Null, Kernel Code, Kernel Data, User Code, User Data.
@@ -105,7 +105,7 @@ void init_gdt()
     // Populate the GDTPtr
     gdt_ptr.limit = (sizeof(gdt) - 1);
     gdt_ptr.base  = (uint32_t)&gdt;
-    printf("[GDT] Base=0x%x, Limit=0x%x\n", gdt_ptr.base, gdt_ptr.limit);
+    debug("[GDT] Base=0x%x, Limit=0x%x\n", gdt_ptr.base, gdt_ptr.limit);
 
     // Flush the GDT with our assembly function
     gdt_flush((uint32_t)&gdt_ptr);
