@@ -83,6 +83,15 @@ jobs:
       - name: Build ISO
         run: make iso CFLAGS="-UDEBUG -UTEST"
 
+      # 5.5 – Prepare build directories
+      - name: Prepare build directories
+        run: |
+          mkdir -p build
+          mkdir -p build/kernel
+          mkdir -p build/boot
+          mkdir -p build/libc
+          mkdir -p build/libc/stdlib
+
       # 7 – Package ISO with a predictable name
       - name: Rename ISO
         run: mv kernel.iso continuumos.iso
