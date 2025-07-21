@@ -74,10 +74,24 @@ jobs:
       - name: Add cross‑compiler to PATH
         run: echo "$PWD/opt/cross/bin" >> "$GITHUB_PATH"
 
+
       - name: Verify toolchain
         run: |
           ${{ env.TARGET }}-gcc --version
           ${{ env.TARGET }}-ld  --version
+
+      # Install Rust for the Rust kernel build
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: i686-unknown-uefi
+          profile: minimal
+          override: true
+
+      - name: Build Rust kernel
+        run: make rustkernel
+        working-directory: ${{ github.workspace }}
 
       # 6 – Build ISO
       - name: Build ISO

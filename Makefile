@@ -48,7 +48,7 @@ KERNEL_ELF = kernel/kernel.bin
 QEMU = qemu-system-i386
 QEMU_FLAGS = -kernel $(KERNEL_ELF)
 
-.PHONY: all clean run directories iso debug runiso
+.PHONY: all clean run directories iso debug runiso rustkernel
 
 all: directories $(KERNEL_ELF)
 
@@ -114,3 +114,7 @@ debug:
 	$(MAKE) clean
 	$(MAKE) CFLAGS="$(CFLAGS) -O0 -g" ASFLAGS="--32"
 	qemu-system-i386 -S -s -kernel kernel/kernel.bin &
+
+# Build the experimental Rust kernel
+rustkernel:
+	@cargo build --manifest-path rust_kernel/Cargo.toml --target i686-unknown-uefi
