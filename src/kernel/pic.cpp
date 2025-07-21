@@ -2,6 +2,7 @@
 #include "stdio.h"
 #include "kernel/port_io.h"
 #include "kernel/pic.h" // Include the new header file
+#include <kernel/debug.h>
 
 #define PIC1 0x20
 #define PIC2 0xA0
@@ -62,11 +63,11 @@ void pic_unmask_irq(uint8_t irq) {
     value = inb(port);
 
     if (value & (1 << irq)) {
-        printf("[ERROR] IRQ%d is STILL masked!\n", irq);
+        error("[PIC] IRQ%d is STILL masked!", irq);
     }
 }
 
 void init_pic() {
     pic_remap();
-    printf("[PIC] PIC initialized\n");
+    success("[PIC] PIC initialized");
 }

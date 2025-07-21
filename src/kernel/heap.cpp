@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include <kernel/debug.h>
 
 // Heap block header structure.
 typedef struct heap_block {
@@ -22,7 +23,7 @@ static size_t align16(size_t size) {
 
 // Initialize the heap (must be called before using kmalloc)
 void init_heap() {
-    printf("[HEAP] Initializing heap at 0x%x, size 0x%x\n", KERNEL_HEAP_START, KERNEL_HEAP_SIZE);
+    debug("[HEAP] Initializing heap at 0x%x, size 0x%x", KERNEL_HEAP_START, KERNEL_HEAP_SIZE);
     
     free_list = (heap_block_t*)KERNEL_HEAP_START;
     free_list->size = KERNEL_HEAP_SIZE - sizeof(heap_block_t);
@@ -39,7 +40,7 @@ void* kmalloc(size_t size) {
     size = align16(size); // Ensure 16-byte alignment
 
     if (!free_list) {
-        printf("[HEAP] Error: Heap is not initialized!\n");
+        error("[HEAP] Error: Heap is not initialized!");
         return NULL;
     }
 
@@ -56,7 +57,7 @@ void* kmalloc(size_t size) {
     }
 
     if (current == NULL) {
-        printf("[HEAP] Error: No free block large enough for %d bytes!\n", size);
+        error("[HEAP] Error: No free block large enough for %d bytes!", size);
         return NULL;
     }
 
@@ -74,7 +75,7 @@ void* kmalloc(size_t size) {
     current->free = 0; // Mark block as used
     void* alloc_addr = (void*)((uintptr_t)current + sizeof(heap_block_t));
 
-    printf("[HEAP] Allocated %d bytes at 0x%x\n", size, (uint32_t)alloc_addr);
+    debug("[HEAP] Allocated %d bytes at 0x%x", size, (uint32_t)alloc_addr);
     return alloc_addr;
 }
 
@@ -84,7 +85,7 @@ void kfree(void* ptr) {
 
     heap_block_t* block = (heap_block_t*)((uintptr_t)ptr - sizeof(heap_block_t));
     block->free = 1;
-    printf("[HEAP] Freed block at 0x%x (size: %d bytes)\n", (uint32_t)ptr, block->size);
+    debug("[HEAP] Freed block at 0x%x (size: %d bytes)", (uint32_t)ptr, block->size);
 
     // Try to merge with next block if free
     if (block->next && block->next->free) {

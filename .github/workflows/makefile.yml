@@ -81,7 +81,24 @@ jobs:
 
       # 6 – Build ISO
       - name: Build ISO
-        run: make iso
+        run: make iso EXTRA_CFLAGS="-UDEBUG -UTEST"
+        working-directory: ${{ github.workspace }}
+
+      # 5.4 – Diagnostic: Show working directory and libc/include contents
+      - name: Show working directory and libc/include contents
+        run: |
+          pwd
+          ls -l libc/include
+          ls -l libc/include/stdlib.h
+
+      # 5.5 – Prepare build directories
+      - name: Prepare build directories
+        run: |
+          mkdir -p build
+          mkdir -p build/kernel
+          mkdir -p build/boot
+          mkdir -p build/libc
+          mkdir -p build/libc/stdlib
 
       # 7 – Package ISO with a predictable name
       - name: Rename ISO
