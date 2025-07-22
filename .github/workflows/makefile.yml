@@ -95,7 +95,7 @@ jobs:
 
       # 6 – Build ISO
       - name: Build ISO
-        run: make iso EXTRA_CFLAGS="-UDEBUG -UTEST"
+        run: make rustkernel EXTRA_CFLAGS="-UDEBUG -UTEST"
         working-directory: ${{ github.workspace }}
 
       # 5.4 – Diagnostic: Show working directory and libc/include contents
