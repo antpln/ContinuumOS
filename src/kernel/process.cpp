@@ -52,3 +52,18 @@ void restore_continuation(Process* p, const ProcessState* state) {
 void register_keyboard_handler(Process* proc, KeyboardHandler handler) {
     proc->keyboard_handler = handler;
 }
+
+void push_io_event(Process* proc, IOEvent event) {
+    int next_head = (proc->io_events.head + 1) % MAX_EVENT_QUEUE_SIZE;
+    if (next_head != proc->io_events.tail) {
+        proc->io_events.queue[proc->io_events.head] = event;
+        proc->io_events.head = next_head;
+    }
+}
+
+int pop_io_event(Process* proc, IOEvent* out_event) {
+    if (proc->io_events.head == proc->io_events.tail) return 0; // Empty
+    *out_event = proc->io_events.queue[proc->io_events.tail];
+    proc->io_events.tail = (proc->io_events.tail + 1) % MAX_EVENT_QUEUE_SIZE;
+    return 1;
+}

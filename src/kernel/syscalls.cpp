@@ -1,6 +1,7 @@
 #include "kernel/ramfs.h"
 #include "kernel/syscalls.h"
 #include "kernel/keyboard.h"
+#include "kernel/process.h"
 #include <stddef.h>
 
 #define KEYBOARD_BUFFER_SIZE 128
@@ -58,4 +59,10 @@ void sys_register_keyboard_handler(KeyboardHandler handler) {
     if (proc) {
         register_keyboard_handler(proc, handler);
     }
+}
+
+int sys_get_io_event(IOEvent* out_event) {
+    Process* proc = scheduler_current_process();
+    if (!proc) return 0;
+    return pop_io_event(proc, out_event);
 }

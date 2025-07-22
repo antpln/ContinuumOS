@@ -25,6 +25,28 @@ typedef struct ProcessState {
 
 typedef void (*KeyboardHandler)(keyboard_event);
 
+#define MAX_EVENT_QUEUE_SIZE 128
+
+typedef enum {
+    EVENT_NONE = 0,
+    EVENT_KEYBOARD,
+    // Future: EVENT_MOUSE, EVENT_TIMER, EVENT_FILE, etc.
+} EventType;
+
+typedef struct {
+    EventType type;
+    union {
+        keyboard_event keyboard;
+        // Future: mouse_event mouse; file_event file; etc.
+    } data;
+} IOEvent;
+
+typedef struct {
+    IOEvent queue[MAX_EVENT_QUEUE_SIZE];
+    int head;
+    int tail;
+} EventQueue;
+
 typedef struct Process {
     int pid;
     const char* name;
@@ -34,6 +56,7 @@ typedef struct Process {
     int speculative;
     uint64_t logical_time;
     Hook* wait_hook;
+    EventQueue io_events; // Per-process I/O event queue
     KeyboardHandler keyboard_handler; // Per-process keyboard callback
 } Process;
 
