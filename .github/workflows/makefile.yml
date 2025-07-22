@@ -89,30 +89,9 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Build Rust kernel
-        run: make rustkernel
-        working-directory: ${{ github.workspace }}
-
-      # 6 – Build ISO
       - name: Build ISO
-        run: make rustkernel EXTRA_CFLAGS="-UDEBUG -UTEST"
+        run: make iso
         working-directory: ${{ github.workspace }}
-
-      # 5.4 – Diagnostic: Show working directory and libc/include contents
-      - name: Show working directory and libc/include contents
-        run: |
-          pwd
-          ls -l libc/include
-          ls -l libc/include/stdlib.h
-
-      # 5.5 – Prepare build directories
-      - name: Prepare build directories
-        run: |
-          mkdir -p build
-          mkdir -p build/kernel
-          mkdir -p build/boot
-          mkdir -p build/libc
-          mkdir -p build/libc/stdlib
 
       # 7 – Package ISO with a predictable name
       - name: Rename ISO

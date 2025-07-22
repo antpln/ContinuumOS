@@ -32,29 +32,21 @@ To build and run ContinuumOS, you will need the following tools:
 
 ### Building
 
-To build the kernel, run the following command:
+To build the kernel and create a bootable ISO image run:
 
 ```sh
-make all
+make iso
 ```
 
-This will create the kernel binary at `kernel/kernel.bin`.
+This produces `kernel.iso` with the compiled Rust kernel.
 
 ### Running
 
 To run the OS in QEMU:
 
 ```sh
-make run
-```
-
-To create a bootable ISO image and run it in QEMU:
-
-```sh
 make runiso
 ```
-
-The ISO image will be created as `kernel.iso`.
 
 ### Cleaning
 
@@ -88,11 +80,8 @@ The port currently includes VGA terminal, I/O port, PIC, GDT, IDT, basic ISR han
 .
 ├── boot/           # Bootloader assembly code
 ├── build/          # Build artifacts
-├── include/        # Header files for the kernel and libc
 ├── kernel/         # Kernel binaries
-├── libc/           # A basic C library implementation
-├── src/            # Source code for the kernel and utilities
-├── rust_kernel/    # Experimental Rust port
+├── rust_kernel/    # Rust kernel sources
 ├── .gitignore      # Git ignore file
 ├── grub.cfg        # GRUB configuration
 ├── linker.ld       # Linker script
