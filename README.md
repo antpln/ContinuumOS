@@ -56,6 +56,16 @@ To remove all build artifacts:
 make clean
 ```
 
+### Experimental Rust Port
+
+An initial Rust-based kernel is provided in `rust_kernel`. Build the static
+library with:
+
+```sh
+make rustkernel
+```
+
+This compiles the Rust code for the `i686-unknown-uefi` target using Cargo.
 Before building, install the Rust toolchain and add the target with:
 
 ```sh
