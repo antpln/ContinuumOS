@@ -80,16 +80,15 @@ extern "C"
 		printf("[KERNEL] Creating /README file via VFS...\n");
 		if (vfs_create("/README") == VFS_SUCCESS) {
 			printf("[KERNEL] README file created successfully\n");
+			
 			// Write content to the file
 			vfs_file_t file;
 			if (vfs_open("/README", &file) == VFS_SUCCESS) {
 				const char *msg = "Welcome to ContinuumOS!";
-				strncpy((char *)readme->data, msg, readme->size);
 				int bytes_written = vfs_write(&file, msg, strlen(msg));
 				printf("[KERNEL] Wrote %d bytes to README\n", bytes_written);
 				vfs_close(&file);
 			}
-			fs_add_child(root, readme);
 		} else {
 			printf("[KERNEL] Failed to create README file\n");
 		}
