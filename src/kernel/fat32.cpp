@@ -296,9 +296,8 @@ int fat32_open(const char* path) {
         return -1;
     }
     
-    // For now, only support files in root directory
-    // Find the file in root directory
-    uint32_t file_cluster = fat32_find_file(fs_info.root_cluster, path);
+    // Use new path resolution to support subdirectories
+    uint32_t file_cluster = fat32_find_file_by_path(path);
     if (file_cluster == 0) {
         printf("[FAT32] File not found: %s\n", path);
         return -1;
@@ -450,4 +449,115 @@ int fat32_get_fs_info(void) {
     printf("  Total clusters: %u\n", fs_info.total_clusters);
     
     return 0;
+}
+
+uint32_t fat32_get_root_cluster(void) {
+    if (!mounted) {
+        return 0;
+    }
+    return fs_info.root_cluster;
+}
+
+// Resolve a path to a directory cluster and extract the final filename
+uint32_t fat32_resolve_path(const char* path, char* filename) {
+    if (!mounted || !path) {
+        return 0;
+    }
+    
+    printf("[FAT32] Resolving path: %s\n", path);
+    
+    // Start from root directory
+    uint32_t current_cluster = fs_info.root_cluster;
+    
+    // Handle root directory case
+    if (strcmp(path, "/") == 0) {
+        if (filename) strcpy(filename, "");
+        return current_cluster;
+    }
+    
+    // Skip leading slash
+    if (path[0] == '/') {
+        path++;
+    }
+    
+    // Parse path components
+    char component[FAT32_MAX_FILENAME + 1];
+    const char* start = path;
+    const char* end;
+    
+    while (*start) {
+        // Find end of current component
+        end = strchr(start, '/');
+        if (!end) {
+            // Last component - this is the filename
+            if (filename) {
+                strncpy(filename, start, FAT32_MAX_FILENAME);
+                filename[FAT32_MAX_FILENAME] = '\0';
+            }
+            printf("[FAT32] Final component: %s (directory cluster: %u)\n", start, current_cluster);
+            return current_cluster;
+        }
+        
+        // Extract directory component
+        size_t len = end - start;
+        if (len > FAT32_MAX_FILENAME) {
+            printf("[FAT32] Directory name too long: %.*s\n", (int)len, start);
+            return 0;
+        }
+        
+        strncpy(component, start, len);
+        component[len] = '\0';
+        
+        printf("[FAT32] Looking for directory: %s in cluster %u\n", component, current_cluster);
+        
+        // Find the directory in current cluster
+        uint32_t dir_cluster = fat32_find_file(current_cluster, component);
+        if (dir_cluster == 0) {
+            printf("[FAT32] Directory not found: %s\n", component);
+            return 0;
+        }
+        
+        // Check if it's actually a directory by looking at its entry
+        fat32_file_info_t files[32];
+        int count = fat32_list_directory(current_cluster, files, 32);
+        int is_directory = 0;
+        
+        for (int i = 0; i < count; i++) {
+            if (strcmp(files[i].filename, component) == 0) {
+                if (files[i].attributes & FAT32_ATTR_DIRECTORY) {
+                    is_directory = 1;
+                }
+                break;
+            }
+        }
+        
+        if (!is_directory) {
+            printf("[FAT32] Path component is not a directory: %s\n", component);
+            return 0;
+        }
+        
+        current_cluster = dir_cluster;
+        start = end + 1;
+    }
+    
+    // If we get here, path ended with '/' - no filename
+    if (filename) strcpy(filename, "");
+    return current_cluster;
+}
+
+// Find a file by full path (supporting subdirectories)
+uint32_t fat32_find_file_by_path(const char* path) {
+    if (!mounted || !path) {
+        return 0;
+    }
+    
+    char filename[FAT32_MAX_FILENAME + 1];
+    uint32_t dir_cluster = fat32_resolve_path(path, filename);
+    
+    if (dir_cluster == 0 || strlen(filename) == 0) {
+        return 0;
+    }
+    
+    printf("[FAT32] Looking for file '%s' in directory cluster %u\n", filename, dir_cluster);
+    return fat32_find_file(dir_cluster, filename);
 }

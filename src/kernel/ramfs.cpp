@@ -1,8 +1,8 @@
 #include "kernel/ramfs.h"
+#include "kernel/vfs.h"
 #include "stdio.h"
 #include "string.h"
 #include "kernel/heap.h"
-#include "string.h"
 
 // For dynamic allocation, we assume a kernel allocator is available.
 
@@ -46,6 +46,7 @@ void fs_add_child(FSNode *parent, FSNode *child)
         printf("Error: directory '%s' is full.\n", parent->name);
         return;
     }
+    
     parent->children[parent->child_count++] = child;
     child->parent = parent;
 }
@@ -182,9 +183,20 @@ FSNode *fs_find_by_path(const char *path)
     if (!path || path[0] != '/')
         return NULL; // Ensure it's an absolute path
 
+    printf("[FS_FIND] Looking for path: %s\n", path);
+    
     FSNode *current = fs_get_root();
-    char temp[128];
+    char temp[VFS_MAX_NAME];
     size_t i = 0;
+
+    // Handle root directory case
+    if (strcmp(path, "/") == 0) {
+        printf("[FS_FIND] Returning root directory\n");
+        return current;
+    }
+    
+    // Skip initial slash
+    path++;
 
     while (*path)
     {
@@ -193,26 +205,79 @@ FSNode *fs_find_by_path(const char *path)
             temp[i] = '\0'; // End of component
             if (strlen(temp) > 0)
             {
-                current = fs_find_child(current, temp);
-                if (!current)
-                    return NULL; // Path not found
+                printf("[FS_FIND] Looking for child: '%s' in directory '%s'\n", temp, current->name);
+                
+                // Handle special directory entries
+                if (strcmp(temp, ".") == 0) {
+                    // Current directory - no change needed
+                    printf("[FS_FIND] Staying in current directory: '%s'\n", current->name);
+                } else if (strcmp(temp, "..") == 0) {
+                    // Parent directory
+                    if (current->parent) {
+                        current = current->parent;
+                        printf("[FS_FIND] Moved to parent directory: '%s'\n", current->name);
+                    } else {
+                        printf("[FS_FIND] Already at root, .. has no effect\n");
+                    }
+                } else {
+                    // Regular child lookup
+                    current = fs_find_child(current, temp);
+                    if (!current) {
+                        printf("[FS_FIND] Child '%s' not found\n", temp);
+                        return NULL; // Path not found
+                    }
+                    printf("[FS_FIND] Found child: '%s', type=%d\n", current->name, current->type);
+                }
             }
             i = 0;
         }
         else
         {
-            temp[i++] = *path;
+            if (i < VFS_MAX_NAME - 1) { // Prevent buffer overflow
+                temp[i++] = *path;
+            } else {
+                return NULL; // Component name too long
+            }
         }
         path++;
     }
+    
+    // Handle last component if path doesn't end with '/'
+    temp[i] = '\0';
+    if (strlen(temp) > 0) {
+        printf("[FS_FIND] Looking for final child: '%s' in directory '%s'\n", temp, current->name);
+        
+        // Handle special directory entries
+        if (strcmp(temp, ".") == 0) {
+            // Current directory - no change needed
+            printf("[FS_FIND] Final component is current directory: '%s'\n", current->name);
+        } else if (strcmp(temp, "..") == 0) {
+            // Parent directory
+            if (current->parent) {
+                current = current->parent;
+                printf("[FS_FIND] Final component moved to parent directory: '%s'\n", current->name);
+            } else {
+                printf("[FS_FIND] Final component: already at root, .. has no effect\n");
+            }
+        } else {
+            // Regular child lookup
+            current = fs_find_child(current, temp);
+            if (!current) {
+                printf("[FS_FIND] Final child '%s' not found\n", temp);
+                return NULL;
+            }
+            printf("[FS_FIND] Found final child: '%s', type=%d\n", current->name, current->type);
+        }
+    }
+    
     return current;
 }
 
-FSNode *fs_find_by_path(const char *path, FSNode *current)
+FSNode *fs_find_by_path_from(const char *path, FSNode *current)
 {
     if (!path)
         return NULL;
-    char temp[128];
+    char temp[VFS_MAX_NAME];
     size_t i = 0;
 
     // If the path starts with '/', start from the root
@@ -229,24 +294,50 @@ FSNode *fs_find_by_path(const char *path, FSNode *current)
             temp[i] = '\0'; // End of component
             if (strlen(temp) > 0)
             {
-                current = fs_find_child(current, temp);
-                if (!current)
-                    return NULL; // Path not found
+                // Handle special directory entries
+                if (strcmp(temp, ".") == 0) {
+                    // Current directory - no change needed
+                } else if (strcmp(temp, "..") == 0) {
+                    // Parent directory
+                    if (current->parent) {
+                        current = current->parent;
+                    }
+                    // If no parent, stay at current (root)
+                } else {
+                    current = fs_find_child(current, temp);
+                    if (!current)
+                        return NULL; // Path not found
+                }
             }
             i = 0;
         }
         else
         {
-            temp[i++] = *path;
+            if (i < VFS_MAX_NAME - 1) { // Prevent buffer overflow
+                temp[i++] = *path;
+            } else {
+                return NULL; // Component name too long
+            }
         }
         path++;
     }
     temp[i] = '\0'; // End of component
     if (strlen(temp) > 0)
     {
-        current = fs_find_child(current, temp);
-        if (!current)
-            return NULL; // Path not found
+        // Handle special directory entries
+        if (strcmp(temp, ".") == 0) {
+            // Current directory - no change needed
+        } else if (strcmp(temp, "..") == 0) {
+            // Parent directory
+            if (current->parent) {
+                current = current->parent;
+            }
+            // If no parent, stay at current (root)
+        } else {
+            current = fs_find_child(current, temp);
+            if (!current)
+                return NULL; // Path not found
+        }
     }
     return current;
 }
@@ -257,8 +348,13 @@ void split_path(const char *path, char *parent_path, char *name)
     if (last_slash)
     {
         size_t parent_len = last_slash - path;
-        strncpy(parent_path, path, parent_len);
-        parent_path[parent_len] = '\0';
+        if (parent_len == 0) {
+            // Root directory case: /filename -> parent="/", name="filename"
+            strcpy(parent_path, "/");
+        } else {
+            strncpy(parent_path, path, parent_len);
+            parent_path[parent_len] = '\0';
+        }
         strcpy(name, last_slash + 1);
     }
     else
@@ -286,13 +382,156 @@ FSNode *fs_touch(const char *path)
     char parent_path[128], name[64];
     split_path(path, parent_path, name);
 
-    FSNode *parent = fs_find_by_path(parent_path);
-    if (!parent || parent->type != FS_DIRECTORY)
-        return NULL;
+    printf("[FS_TOUCH] Path: '%s' -> parent: '%s', name: '%s'\n", path, parent_path, name);
 
+    FSNode *parent = fs_find_by_path(parent_path);
+    if (!parent) {
+        printf("[FS_TOUCH] Parent not found: '%s'\n", parent_path);
+        return NULL;
+    }
+    if (parent->type != FS_DIRECTORY) {
+        printf("[FS_TOUCH] Parent is not a directory: '%s' (type=%d)\n", parent_path, parent->type);
+        return NULL;
+    }
+
+    printf("[FS_TOUCH] Creating file node with FS_FILE=%d\n", FS_FILE);
     FSNode *new_file = fs_create_node(name, FS_FILE);
+    if (!new_file) {
+        printf("[FS_TOUCH] Failed to create node\n");
+        return NULL;
+    }
+    
+    printf("[FS_TOUCH] Created node with type=%d\n", new_file->type);
     new_file->data = (uint8_t *)kmalloc(1024); // Allocate 1KiB buffer
     new_file->size = 0;
+    
+    printf("[FS_TOUCH] Before fs_add_child: node type=%d\n", new_file->type);
     fs_add_child(parent, new_file);
+    printf("[FS_TOUCH] After fs_add_child: node type=%d\n", new_file->type);
+    
     return new_file;
+}
+
+// Free a node and all its resources
+void fs_free_node(FSNode* node) {
+    if (!node) return;
+    
+    // Free file data if it exists
+    if (node->data) {
+        kfree(node->data);
+        node->data = NULL;
+    }
+    
+    // Free children array if it exists (for directories)
+    if (node->children) {
+        kfree(node->children);
+        node->children = NULL;
+    }
+    
+    // Free the node itself
+    kfree(node);
+}
+
+// Remove a file
+int fs_remove(const char* path) {
+    if (!path) {
+        printf("[FS_REMOVE] Invalid path\n");
+        return -1;
+    }
+    
+    printf("[FS_REMOVE] Removing file: %s\n", path);
+    
+    // Find the file
+    FSNode* node = fs_find_by_path(path);
+    if (!node) {
+        printf("[FS_REMOVE] File not found: %s\n", path);
+        return -1;
+    }
+    
+    // Check if it's a file
+    if (node->type != FS_FILE) {
+        printf("[FS_REMOVE] Path is not a file: %s (type=%d)\n", path, node->type);
+        return -1;
+    }
+    
+    // Check if file is currently open
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+        if (fd_table[i].used && fd_table[i].node == node) {
+            printf("[FS_REMOVE] Cannot remove file: %s (file is open)\n", path);
+            return -1;
+        }
+    }
+    
+    // Remove from parent directory
+    if (node->parent) {
+        fs_remove_child(node->parent, node);
+    }
+    
+    // Free the node
+    fs_free_node(node);
+    
+    printf("[FS_REMOVE] File removed successfully: %s\n", path);
+    return 0;
+}
+
+// Remove a directory
+int fs_rmdir(const char* path) {
+    if (!path) {
+        printf("[FS_RMDIR] Invalid path\n");
+        return -1;
+    }
+    
+    printf("[FS_RMDIR] Removing directory: %s\n", path);
+    
+    // Cannot remove root directory
+    if (strcmp(path, "/") == 0) {
+        printf("[FS_RMDIR] Cannot remove root directory\n");
+        return -1;
+    }
+    
+    // Find the directory
+    FSNode* node = fs_find_by_path(path);
+    if (!node) {
+        printf("[FS_RMDIR] Directory not found: %s\n", path);
+        return -1;
+    }
+    
+    // Check if it's a directory
+    if (node->type != FS_DIRECTORY) {
+        printf("[FS_RMDIR] Path is not a directory: %s (type=%d)\n", path, node->type);
+        return -1;
+    }
+    
+    // Check if directory is empty
+    if (node->child_count > 0) {
+        printf("[FS_RMDIR] Directory not empty: %s (%zu children)\n", path, node->child_count);
+        return -1;
+    }
+    
+    // Check if any files in this directory are open
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+        if (fd_table[i].used && fd_table[i].node) {
+            FSNode* open_node = fd_table[i].node;
+            // Check if the open file is in this directory or subdirectory
+            FSNode* current = open_node->parent;
+            while (current) {
+                if (current == node) {
+                    printf("[FS_RMDIR] Cannot remove directory: %s (contains open files)\n", path);
+                    return -1;
+                }
+                current = current->parent;
+            }
+        }
+    }
+    
+    // Remove from parent directory
+    if (node->parent) {
+        fs_remove_child(node->parent, node);
+    }
+    
+    // Free the node
+    fs_free_node(node);
+    
+    printf("[FS_RMDIR] Directory removed successfully: %s\n", path);
+    return 0;
 }

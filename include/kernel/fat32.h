@@ -114,7 +114,10 @@ int fat32_seek(int fd, uint32_t position);
 void fat32_close(int fd);
 int fat32_list_directory(uint32_t dir_cluster, fat32_file_info_t* files, int max_files);
 uint32_t fat32_find_file(uint32_t dir_cluster, const char* filename);
+uint32_t fat32_find_file_by_path(const char* path);
+uint32_t fat32_resolve_path(const char* path, char* filename);
 int fat32_get_fs_info(void);
+uint32_t fat32_get_root_cluster(void);
 
 // Internal functions
 uint32_t fat32_cluster_to_sector(uint32_t cluster);

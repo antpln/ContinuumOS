@@ -16,6 +16,8 @@ typedef struct shell_command_t {
 } shell_command_t;
 
 void cmd_help(const char* args);
+void cmd_mount(const char* args);
+void cmd_umount(const char* args);
 
 // Process a completed command line.
 void shell_process_command(const char* cmd);

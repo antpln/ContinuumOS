@@ -4,7 +4,7 @@
 #include <kernel/keyboard.h>
 #include <kernel/isr.h>
 #include <kernel/timer.h>
-#include <kernel/ramfs.h>
+#include <kernel/vfs.h>
 #include <kernel/heap.h>
 #include <kernel/vga.h>      
 #include <kernel/shell.h>
@@ -26,7 +26,6 @@ typedef struct {
     char     buffer[SHELL_BUFFER_SIZE];
     size_t   index;
     bool     input_enabled;
-    FSNode*  cwd;
     char     history[SHELL_HISTORY_SIZE][SHELL_BUFFER_SIZE];
     size_t   history_count;
     int      history_nav;
@@ -56,7 +55,6 @@ static void shell_print_prompt(void) {
 void shell_init(void) {
     shell.index         = 0;
     shell.input_enabled = true;
-    shell.cwd           = fs_get_root();
     shell.history_count = 0;
     shell.history_nav   = -1;
     printf("Welcome to nutshell!\n");
@@ -170,113 +168,205 @@ void cmd_help(const char* args) {
 
 // List directory contents
 void cmd_ls(const char* args) {
-    (void)args;
-    if (!shell.cwd) shell.cwd = fs_get_root();
-    for (size_t i = 0; i < shell.cwd->child_count; ++i) {
-        FSNode* n = shell.cwd->children[i];
+    const char* path = args && *args ? args : vfs_getcwd();
+    
+    vfs_dirent_t entries[32];
+    int count = vfs_readdir(path, entries, 32);
+    
+    if (count < 0) {
+        printf("ls: cannot access '%s': No such file or directory\n", path);
+        return;
+    }
+    
+    for (int i = 0; i < count; i++) {
         printf("%s%s  ",
-               n->name,
-               (n->type == FS_DIRECTORY) ? "/" : "");
+               entries[i].name,
+               (entries[i].type == VFS_TYPE_DIRECTORY) ? "/" : "");
     }
     printf("\n");
 }
 
 // Change directory
 void cmd_cd(const char* args) {
-    if (!shell.cwd) shell.cwd = fs_get_root();
     if (!args || !*args) {
         printf("Usage: cd <dir>\n");
         return;
     }
-    if (strcmp(args, "..") == 0) {
-        if (shell.cwd->parent) shell.cwd = shell.cwd->parent;
-        else printf("Already at root.\n");
+    
+    char new_path[VFS_MAX_PATH];
+    
+    // Handle relative paths
+    if (args[0] != '/') {
+        // Build absolute path from current directory
+        strcpy(new_path, vfs_getcwd());
+        if (strcmp(new_path, "/") != 0) {
+            strcat(new_path, "/");
+        }
+        strcat(new_path, args);
+    } else {
+        strcpy(new_path, args);
+    }
+    
+    // Validate that the target is a directory
+    vfs_dirent_t info;
+    if (vfs_stat(new_path, &info) != VFS_SUCCESS) {
+        printf("cd: No such file or directory '%s'\n", args);
         return;
     }
-    FSNode* target = fs_find_child(shell.cwd, args);
-    if (target && target->type == FS_DIRECTORY)
-        shell.cwd = target;
-    else
-        printf("cd: No such directory '%s'\n", args);
+    
+    if (info.type != VFS_TYPE_DIRECTORY) {
+        printf("cd: Not a directory '%s'\n", args);
+        return;
+    }
+    
+    // Change directory
+    if (vfs_chdir(new_path) != VFS_SUCCESS) {
+        printf("cd: Failed to change directory to '%s'\n", args);
+    }
 }
 
 // Print file contents
 void cmd_cat(const char* args) {
-    if (!shell.cwd) shell.cwd = fs_get_root();
     if (!args || !*args) {
         printf("Usage: cat <file>\n");
         return;
     }
-    FSNode* f = fs_find_child(shell.cwd, args);
-    if (f && f->type == FS_FILE)
-        printf("%s\n", (char*)f->data);
-    else
-        printf("cat: No such file '%s'\n", args);
+    
+    char path[VFS_MAX_PATH];
+    
+    // Handle relative paths
+    if (args[0] != '/') {
+        strcpy(path, vfs_getcwd());
+        if (strcmp(path, "/") != 0) {
+            strcat(path, "/");
+        }
+        strcat(path, args);
+    } else {
+        strcpy(path, args);
+    }
+    
+    vfs_file_t file;
+    if (vfs_open(path, &file) != VFS_SUCCESS) {
+        printf("cat: cannot open '%s': No such file\n", args);
+        return;
+    }
+    
+    char buffer[256];
+    int bytes_read;
+    while ((bytes_read = vfs_read(&file, buffer, sizeof(buffer) - 1)) > 0) {
+        buffer[bytes_read] = '\0';
+        printf("%s", buffer);
+    }
+    printf("\n");
+    
+    vfs_close(&file);
 }
 
 // Create a new file
 void cmd_touch(const char* args) {
-    if (!shell.cwd) shell.cwd = fs_get_root();
     if (!args || !*args) {
         printf("Usage: touch <file>\n");
         return;
     }
-    FSNode* f = fs_create_node(args, FS_FILE);
-    if (!f) {
-        printf("Error: could not create file '%s'\n", args);
-        return;
+    
+    char path[VFS_MAX_PATH];
+    
+    // Handle relative paths
+    if (args[0] != '/') {
+        strcpy(path, vfs_getcwd());
+        if (strcmp(path, "/") != 0) {
+            strcat(path, "/");
+        }
+        strcat(path, args);
+    } else {
+        strcpy(path, args);
     }
-    f->size = 0;
-    f->data = NULL;
-    fs_add_child(shell.cwd, f);
-    printf("File '%s' created.\n", args);
+    
+    if (vfs_create(path) != VFS_SUCCESS) {
+        printf("touch: cannot create '%s'\n", args);
+    } else {
+        printf("File '%s' created.\n", args);
+    }
 }
 
 // Create a new directory
 void cmd_mkdir(const char* args) {
-    if (!shell.cwd) shell.cwd = fs_get_root();
     if (!args || !*args) {
         printf("Usage: mkdir <dir>\n");
         return;
     }
-    FSNode* d = fs_create_node(args, FS_DIRECTORY);
-    if (!d) {
-        printf("Error: could not create directory '%s'\n", args);
-        return;
+    
+    char path[VFS_MAX_PATH];
+    
+    // Handle relative paths
+    if (args[0] != '/') {
+        strcpy(path, vfs_getcwd());
+        if (strcmp(path, "/") != 0) {
+            strcat(path, "/");
+        }
+        strcat(path, args);
+    } else {
+        strcpy(path, args);
     }
-    fs_add_child(shell.cwd, d);
-    printf("Directory '%s' created.\n", args);
+    
+    if (vfs_mkdir(path) != VFS_SUCCESS) {
+        printf("mkdir: cannot create directory '%s'\n", args);
+    } else {
+        printf("Directory '%s' created.\n", args);
+    }
 }
 
 // Remove a file
 void cmd_rm(const char* args) {
-    if (!shell.cwd) shell.cwd = fs_get_root();
     if (!args || !*args) {
         printf("Usage: rm <file>\n");
         return;
     }
-    FSNode* f = fs_find_child(shell.cwd, args);
-    if (f && f->type == FS_FILE) {
-        fs_remove_child(shell.cwd, f);
-        printf("File '%s' removed.\n", args);
+    
+    char path[VFS_MAX_PATH];
+    
+    // Handle relative paths
+    if (args[0] != '/') {
+        strcpy(path, vfs_getcwd());
+        if (strcmp(path, "/") != 0) {
+            strcat(path, "/");
+        }
+        strcat(path, args);
     } else {
-        printf("rm: No such file '%s'\n", args);
+        strcpy(path, args);
+    }
+    
+    if (vfs_remove(path) != VFS_SUCCESS) {
+        printf("rm: cannot remove '%s'\n", args);
+    } else {
+        printf("File '%s' removed.\n", args);
     }
 }
 
 // Remove a directory
 void cmd_rmdir(const char* args) {
-    if (!shell.cwd) shell.cwd = fs_get_root();
     if (!args || !*args) {
         printf("Usage: rmdir <dir>\n");
         return;
     }
-    FSNode* d = fs_find_child(shell.cwd, args);
-    if (d && d->type == FS_DIRECTORY) {
-        fs_remove_child(shell.cwd, d);
-        printf("Directory '%s' removed.\n", args);
+    
+    char path[VFS_MAX_PATH];
+    
+    // Handle relative paths
+    if (args[0] != '/') {
+        strcpy(path, vfs_getcwd());
+        if (strcmp(path, "/") != 0) {
+            strcat(path, "/");
+        }
+        strcat(path, args);
     } else {
-        printf("rmdir: No such directory '%s'\n", args);
+        strcpy(path, args);
+    }
+    
+    if (vfs_rmdir(path) != VFS_SUCCESS) {
+        printf("rmdir: cannot remove directory '%s'\n", args);
+    } else {
+        printf("Directory '%s' removed.\n", args);
     }
 }
 
@@ -288,24 +378,7 @@ void cmd_echo(const char* args) {
 // Print working directory
 void cmd_pwd(const char* args) {
     (void)args;
-    if (!shell.cwd) shell.cwd = fs_get_root();
-    const char* names[SHELL_PWD_MAX_DEPTH];
-    size_t depth = 0;
-    for (FSNode* node = shell.cwd; node && node->parent; node = node->parent) {
-        if (depth < SHELL_PWD_MAX_DEPTH) {
-            names[depth++] = node->name;
-        } else {
-            break;
-        }
-    }
-    printf("/");
-    for (size_t i = 0; i < depth; ++i) {
-        printf("%s", names[depth - i - 1]);
-        if (i + 1 < depth) {
-            printf("/");
-        }
-    }
-    printf("\n");
+    printf("%s\n", vfs_getcwd());
 }
 
 // Print system uptime
@@ -331,12 +404,8 @@ void cmd_history(const char* args) {
 
 // Open file in editor
 void cmd_edit(const char* args) {
-    if (!args || !*args) {
-        printf("Usage: edit <file>\n");
-        return;
-    }
-    if (!shell.cwd) shell.cwd = fs_get_root();
-    editor_start(args, shell.cwd);
+    (void)args;
+    printf("edit: VFS integration not yet implemented\n");
 }
 
 // List block devices
@@ -374,16 +443,38 @@ void cmd_disktest(const char* args) {
     }
 }
 
-// Mount FAT32 filesystem
-void cmd_mount_fat32(const char* args) {
-    (void)args;
-    printf("Attempting to mount FAT32 filesystem on device 0...\n");
+// Mount filesystem command
+void cmd_mount(const char* args) {
+    if (!args || !*args) {
+        printf("Current mounts:\n");
+        vfs_list_mounts();
+        printf("\nUsage: mount fat32 - Mount FAT32 from device 0 to /mnt/fat32\n");
+        return;
+    }
     
-    int result = fat32_mount(0);
-    if (result == 0) {
-        printf("FAT32 filesystem mounted successfully!\n");
+    if (strcmp(args, "fat32") == 0) {
+        if (fat32_vfs_mount("/mnt/fat32", 0) == VFS_SUCCESS) {
+            printf("FAT32 filesystem mounted at /mnt/fat32\n");
+        } else {
+            printf("Failed to mount FAT32 filesystem\n");
+        }
     } else {
-        printf("Failed to mount FAT32 filesystem\n");
+        printf("Unknown filesystem type: %s\n", args);
+        printf("Supported types: fat32\n");
+    }
+}
+
+// Unmount filesystem
+void cmd_umount(const char* args) {
+    if (!args || !*args) {
+        printf("Usage: umount <mountpoint>\n");
+        return;
+    }
+    
+    if (vfs_unmount(args) == VFS_SUCCESS) {
+        printf("Filesystem unmounted from %s\n", args);
+    } else {
+        printf("Failed to unmount %s\n", args);
     }
 }
 
@@ -393,45 +484,41 @@ void cmd_fat32_info(const char* args) {
     fat32_get_fs_info();
 }
 
-// List FAT32 root directory
+// List FAT32 root directory (legacy command - use ls /mnt/fat32 instead)
 void cmd_fat32_ls(const char* args) {
     (void)args;
-    printf("Listing FAT32 root directory:\n");
-    fat32_list_directory(2, NULL, 32); // Root cluster is 2
+    printf("Use 'ls /mnt/fat32' instead\n");
 }
 
-// Read and display FAT32 file
+// Read and display FAT32 file (legacy command - use cat /mnt/fat32/filename instead)
 void cmd_fat32_cat(const char* args) {
     if (!args || !*args) {
         printf("Usage: fat32cat <filename>\n");
+        printf("Note: Use 'cat /mnt/fat32/<filename>' instead\n");
         return;
     }
     
-    printf("Reading FAT32 file: %s\n", args);
+    char path[VFS_MAX_PATH];
+    strcpy(path, "/mnt/fat32/");
+    strcat(path, args);
     
-    // Open file
-    int fd = fat32_open(args);
-    if (fd < 0) {
+    printf("Reading FAT32 file via VFS: %s\n", path);
+    
+    vfs_file_t file;
+    if (vfs_open(path, &file) != VFS_SUCCESS) {
         printf("Failed to open file: %s\n", args);
         return;
     }
     
-    // Read file content
     char buffer[512];
-    int bytes_read = fat32_read(fd, buffer, sizeof(buffer) - 1);
-    
-    if (bytes_read > 0) {
-        buffer[bytes_read] = '\0'; // Null terminate
-        printf("File content (%d bytes):\n", bytes_read);
-        printf("%s\n", buffer);
-    } else if (bytes_read == 0) {
-        printf("File is empty\n");
-    } else {
-        printf("Failed to read file\n");
+    int bytes_read;
+    while ((bytes_read = vfs_read(&file, buffer, sizeof(buffer) - 1)) > 0) {
+        buffer[bytes_read] = '\0';
+        printf("%s", buffer);
     }
+    printf("\n");
     
-    // Close file
-    fat32_close(fd);
+    vfs_close(&file);
 }
 
 // Command lookup table
@@ -451,9 +538,10 @@ shell_command_t commands[] = {
     { "edit",      cmd_edit,      "Edit a file" },
     { "lsblk",     cmd_lsblk,     "List block devices" },
     { "disktest",  cmd_disktest,  "Test disk reading" },
-    { "mount",     cmd_mount_fat32, "Mount FAT32 filesystem" },
+    { "mount",     cmd_mount,      "Mount filesystem" },
+    { "umount",    cmd_umount,     "Unmount filesystem" },
     { "fsinfo",    cmd_fat32_info, "Show filesystem info" },
-    { "fat32ls",   cmd_fat32_ls,   "List FAT32 root directory" },
-    { "fat32cat",  cmd_fat32_cat,  "Read and display FAT32 file" },
+    { "fat32ls",   cmd_fat32_ls,   "List FAT32 root directory (legacy)" },
+    { "fat32cat",  cmd_fat32_cat,  "Read and display FAT32 file (legacy)" },
     { NULL,        NULL,          NULL }
 };
