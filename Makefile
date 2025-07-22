@@ -1,116 +1,41 @@
-# Cross-compiler setup
-CC = i686-elf-gcc
-CXX = i686-elf-g++
-AS = i686-elf-as
+# Minimal Makefile for building the Rust kernel
 
-# Directories
-SRC_DIR = src
-INCLUDE_DIR = include
-BUILD_DIR = build
-BOOT_DIR = boot
-KERNEL_DIR = $(SRC_DIR)/kernel
-KERNEL_DEST = ./kernel
-LIBC_DIR = libc
+TARGET := i686-unknown-uefi
+RUST_LIB := rust_kernel/target/$(TARGET)/debug/librust_kernel.a
+BOOT_OBJ := build/boot.o
+KERNEL_ELF := kernel/kernel.bin
 
-# Create kernel directory if it doesn't exist
-$(shell mkdir -p $(KERNEL_DEST))
+CC := i686-elf-gcc
+AS := i686-elf-as
 
-# Compiler flags
-CFLAGS = -O2 -g -std=gnu99 -ffreestanding -Wall -Wextra -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include -DDEBUG -DTEST
-CXXFLAGS = -O2 -g -ffreestanding -Wall -Wextra -fno-exceptions -fno-rtti -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include
-CXXFLAGS += $(CFLAGS)
-LDFLAGS = -ffreestanding -O2 -nostdlib
+.PHONY: all rustkernel iso run runiso clean
 
-CFLAGS += $(EXTRA_CFLAGS)
+all: $(KERNEL_ELF)
 
-# Source files (exclude toolchain build directories)
-CSOURCES = $(shell find $(SRC_DIR) -name '*.c' ! -path "*/binutils-*" ! -path "*/gcc-*" ! -path "*/build-*")
-CPPSOURCES = $(shell find $(SRC_DIR) -name '*.cpp' ! -path "*/binutils-*" ! -path "*/gcc-*" ! -path "*/build-*")
-ASMSOURCES = $(shell find $(BOOT_DIR) -name '*.s')
-KERNEL_ASMSOURCES = $(shell find $(KERNEL_DIR) -name '*.s')
-LIBC_CSOURCES = $(shell find $(LIBC_DIR) -type f -name '*.c')
-LIBC_CPPSOURCES = $(shell find $(LIBC_DIR) -type f -name '*.cpp')
-
-# Object files
-KERNEL_OBJS = $(patsubst $(KERNEL_DIR)/%.s,$(BUILD_DIR)/kernel/%.o,$(KERNEL_ASMSOURCES))
-BOOT_OBJS = $(patsubst $(BOOT_DIR)/%.s,$(BUILD_DIR)/boot/%.o,$(ASMSOURCES))
-C_OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(CSOURCES))
-CPP_OBJS = $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(CPPSOURCES))
-LIBC_C_OBJS = $(patsubst $(LIBC_DIR)/%,$(BUILD_DIR)/libc/%,$(LIBC_CSOURCES:.c=.o))
-LIBC_CPP_OBJS = $(patsubst $(LIBC_DIR)/%,$(BUILD_DIR)/libc/%,$(LIBC_CPPSOURCES:.cpp=.o))
-
-OBJECTS = $(sort $(BOOT_OBJS) $(C_OBJS) $(CPP_OBJS) $(KERNEL_OBJS) $(LIBC_C_OBJS) $(LIBC_CPP_OBJS))
-
-# Output files
-KERNEL_ELF = kernel/kernel.bin
-
-# QEMU configuration
-QEMU = qemu-system-i386
-QEMU_FLAGS = -kernel $(KERNEL_ELF)
-
-.PHONY: all clean run directories iso debug runiso
-
-all: directories $(KERNEL_ELF)
-
-directories:
-	@mkdir -p $(BUILD_DIR)
-	@mkdir -p $(BUILD_DIR)/kernel
-	@mkdir -p $(BUILD_DIR)/boot
-	@mkdir -p $(BUILD_DIR)/libc
-	@mkdir -p $(BUILD_DIR)/libc/stdlib
-
-$(KERNEL_ELF): $(OBJECTS)
-	$(CXX) -T linker.ld -o $(KERNEL_DEST)/kernel.bin $(LDFLAGS) $(OBJECTS) -lgcc
-	grub-file --is-x86-multiboot $(KERNEL_DEST)/kernel.bin
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
-	@mkdir -p $(dir $@)
-	$(CXX) -c $< -o $@ $(CXXFLAGS)
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
-	@mkdir -p $(dir $@)
-	$(CC) -c $< -o $@ $(CFLAGS)
-
-$(BUILD_DIR)/boot/%.o: $(BOOT_DIR)/%.s
-	@mkdir -p $(dir $@)
+$(BOOT_OBJ): boot/boot.s
+	mkdir -p $(dir $@)
 	$(AS) $< -o $@
 
-$(BUILD_DIR)/kernel/%.o: $(KERNEL_DIR)/%.s
-	@mkdir -p $(dir $@)
-	$(AS) $< -o $@
+rustkernel:
+	cargo build --manifest-path rust_kernel/Cargo.toml --target $(TARGET)
 
-# Update libc compilation rules
-$(BUILD_DIR)/libc/%.o: $(LIBC_DIR)/%.cpp
-	@mkdir -p $(dir $@)
-	@echo "Compiling C++: $<"
-	$(CXX) -c $< -o $@ $(CXXFLAGS)
-
-$(BUILD_DIR)/libc/%.o: $(LIBC_DIR)/%.c
-	@mkdir -p $(dir $@)
-	@echo "Compiling C: $<"
-	$(CC) -c $< -o $@ $(CFLAGS)
+$(KERNEL_ELF): $(BOOT_OBJ) rustkernel linker.ld
+	mkdir -p $(dir $@)
+	$(CC) -T linker.ld -nostdlib -o $@ $(BOOT_OBJ) $(RUST_LIB) -lgcc
+	grub-file --is-x86-multiboot $@
 
 iso: $(KERNEL_ELF)
 	mkdir -p isodir/boot/grub
-	cp $(KERNEL_DEST)/kernel.bin isodir/boot/kernel.bin
+	cp $(KERNEL_ELF) isodir/boot/kernel.bin
 	cp grub.cfg isodir/boot/grub/grub.cfg
 	grub-mkrescue -o kernel.iso isodir
 
 run: $(KERNEL_ELF)
-	$(QEMU) $(QEMU_FLAGS)
+	qemu-system-i386 -kernel $(KERNEL_ELF)
 
 runiso: iso
-	$(QEMU) -cdrom kernel.iso
+	qemu-system-i386 -cdrom kernel.iso
 
 clean:
-	rm -rf $(BUILD_DIR)
-	rm -rf isodir
-	rm -f kernel.iso
-	rm -f $(KERNEL_DEST)/kernel.bin
-	rm -f $(KERNEL_DEST)/kernel2.bin
-
-# Add debug target
-debug:
-	$(MAKE) clean
-	$(MAKE) CFLAGS="$(CFLAGS) -O0 -g" ASFLAGS="--32"
-	qemu-system-i386 -S -s -kernel kernel/kernel.bin &
+	rm -rf build kernel.iso isodir kernel
+	rm -rf rust_kernel/target
