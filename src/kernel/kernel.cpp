@@ -12,10 +12,13 @@
 #include "kernel/timer.h"
 #include "kernel/shell.h"
 #include "kernel/ramfs.h"
+#include "kernel/vfs.h"
 #include "kernel/debug.h"
 #include "kernel/tests/memtest.h"
 #include "kernel/tests/pagetest.h"
 #include "kernel/tests/heaptest.h"
+#include "kernel/blockdev.h"
+#include "kernel/fat32.h"
 
 #include "utils.h"
 #include <stdio.h> // Changed back to just stdio.h since include path is set in Makefile
@@ -30,14 +33,8 @@ extern "C"
 
 	void kernel_main(uint32_t multiboot_info)
 	{
-
-		char *ascii_guitar = R"(
-          Q
-         /|\
-       (o\_)=="#
-        \| |\
-       ~H| |/
-            ~)";
+		(void)multiboot_info; // Suppress unused parameter warning
+		
 		terminal.initialize();
 
 		// Initialize the Physical Memory Manager (PMM) before paging
@@ -58,9 +55,43 @@ extern "C"
 		// Set up heap
 		init_heap();
 
+		// Initialize block devices (IDE, etc.)
+		blockdev_init();
+
+		// Initialize FAT32 support
+		fat32_init();
+
 		// Initialize the RAMFS.
 		fs_init();
-
+		// Initialize VFS (Virtual File System)
+		vfs_init();
+		// Mount RamFS at root
+		ramfs_vfs_mount("/");
+		// Create /mnt directory for mount points
+		printf("[KERNEL] Creating /mnt directory...\n");
+		if (vfs_mkdir("/mnt") == VFS_SUCCESS) {
+			printf("[KERNEL] /mnt directory created successfully\n");
+		} else {
+			printf("[KERNEL] Failed to create /mnt directory\n");
+		}
+		// Try to mount FAT32 if available
+		fat32_vfs_mount("/mnt/fat32", 0);
+		// Create some built-in files using VFS
+		printf("[KERNEL] Creating /README file via VFS...\n");
+		if (vfs_create("/README") == VFS_SUCCESS) {
+			printf("[KERNEL] README file created successfully\n");
+			
+			// Write content to the file
+			vfs_file_t file;
+			if (vfs_open("/README", &file) == VFS_SUCCESS) {
+				const char *msg = "Welcome to ContinuumOS!";
+				int bytes_written = vfs_write(&file, msg, strlen(msg));
+				printf("[KERNEL] Wrote %d bytes to README\n", bytes_written);
+				vfs_close(&file);
+			}
+		} else {
+			printf("[KERNEL] Failed to create README file\n");
+		}
 		#ifdef TEST
 		MemoryTester mem_tester;
 		if (!mem_tester.test_allocation()) {
@@ -80,32 +111,11 @@ extern "C"
 		}
 		paging_test();
 		#endif
-
-		// Create some built-in files or directories.
-		FSNode *root = fs_get_root();
-		FSNode *readme = fs_create_node("README", FS_FILE);
-		if (readme)
-		{
-			// Allocate a buffer for the file content.
-			readme->size = 128;
-			readme->data = (uint8_t *)kmalloc(readme->size);
-			if (readme->data)
-			{
-				// Write some content into the file.
-				const char *msg = "Welcome to ContinuumOS!";
-				strncpy((char *)readme->data, msg, readme->size);
-			}
-			fs_add_child(root, readme);
-		}
-
 		keyboard_install();
 		// Initialize the PIT timer to 1000 Hz
 		init_timer(1000);
-
 		shell_init();
-
 		__asm__ volatile("sti");
-
 		while (1)
 		{
 			__asm__ volatile("hlt");
