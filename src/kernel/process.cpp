@@ -48,3 +48,7 @@ void restore_continuation(Process* p, const ProcessState* state) {
 
     p->current_state = *state;
 }
+
+void register_keyboard_handler(Process* proc, KeyboardHandler handler) {
+    proc->keyboard_handler = handler;
+}

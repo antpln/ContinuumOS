@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <kernel/vga.h>
+#include <kernel/syscalls.h>
 #include <stdarg.h>
 
 extern Terminal terminal; // Access singleton terminal object
@@ -189,3 +190,25 @@ int vprintf(const char* format, va_list args) {
 #ifdef __cplusplus
 }
 #endif
+
+// File I/O wrappers
+int open(const char* path) {
+    return sys_open(path);
+}
+
+int read(int fd, uint8_t* buffer, size_t size) {
+    return sys_read(fd, buffer, size);
+}
+
+int write(int fd, const uint8_t* buffer, size_t size) {
+    return sys_write(fd, buffer, size);
+}
+
+void close(int fd) {
+    sys_close(fd);
+}
+
+// Keyboard input wrapper
+int getchar() {
+    return sys_getchar();
+}

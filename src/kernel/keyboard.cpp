@@ -6,6 +6,8 @@
 #include "stdio.h"
 #include "kernel/shell.h"
 #include "kernel/debug.h"
+#include "kernel/syscalls.h"
+#include "kernel/scheduler.h"
 
 static bool shift_pressed = false;
 static bool caps_lock_active = false;
@@ -92,6 +94,14 @@ keyboard_event read_keyboard() {
 void keyboard_callback(registers_t *regs) {
     (void)regs; // Unused
     keyboard_event event = read_keyboard();
+    char c = kb_to_ascii(event);
+    if (c) {
+        keyboard_buffer_push(c);
+    }
+    Process* proc = scheduler_current_process();
+    if (proc && proc->keyboard_handler) {
+        proc->keyboard_handler(event);
+    }
     shell_handle_key(event);
 }
 

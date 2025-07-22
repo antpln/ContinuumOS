@@ -33,5 +33,6 @@ typedef struct keyboard_event {
 void keyboard_install();
 void keyboard_poll();
 char kb_to_ascii(keyboard_event event);
+void keyboard_buffer_push(char c);
 
 #endif // KEYBOARD_H
