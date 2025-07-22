@@ -44,8 +44,22 @@ static void itoa(int32_t value, char* buffer, int base) {
     buffer[j] = '\0';  // Null-terminate the string
 }
 
-
-
+static void utoa(uint32_t value, char* buffer, int base) {
+    static char digits[] = "0123456789ABCDEF";
+    char temp[32];
+    int i = 0;
+    // Convert the number to string
+    do {
+        temp[i++] = digits[value % base];
+        value /= base;
+    } while (value > 0);
+    // Reverse the string into buffer
+    int j = 0;
+    while (i > 0) {
+        buffer[j++] = temp[--i];
+    }
+    buffer[j] = '\0';
+}
 
 // Convert integer to string (supports base 10 and 16)
 int printf(const char* format, ...) {
@@ -66,7 +80,7 @@ int printf(const char* format, ...) {
                 }
                 case 'u': { // Unsigned Integer
                     unsigned int num = va_arg(args, unsigned int);
-                    itoa((int32_t)num, buffer, 10);
+                    utoa(num, buffer, 10);
                     terminal.writestring(buffer);
                     break;
                 }
@@ -111,3 +125,67 @@ int printf(const char* format, ...) {
     va_end(args);
     return 0;
 }
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+int vprintf(const char* format, va_list args) {
+    char buffer[32];
+    while (*format) {
+        if (*format == '%') {
+            format++;
+            switch (*format) {
+                case 'd': {
+                    int num = va_arg(args, int);
+                    itoa(num, buffer, 10);
+                    terminal.writestring(buffer);
+                    break;
+                }
+                case 'u': {
+                    unsigned int num = va_arg(args, unsigned int);
+                    utoa(num, buffer, 10);
+                    terminal.writestring(buffer);
+                    break;
+                }
+                case 'x': {
+                    unsigned int num = va_arg(args, unsigned int);
+                    terminal.writestring("0x");
+                    itoa((int32_t)num, buffer, 16);
+                    terminal.writestring(buffer);
+                    break;
+                }
+                case 's': {
+                    char* str = va_arg(args, char*);
+                    terminal.writestring(str);
+                    break;
+                }
+                case 'c': {
+                    char c = (char)va_arg(args, int);
+                    terminal.putchar(c);
+                    break;
+                }
+                case 'p': {
+                    void* ptr = va_arg(args, void*);
+                    terminal.writestring("0x");
+                    itoa((uintptr_t)ptr, buffer, 16);
+                    terminal.writestring(buffer);
+                    break;
+                }
+                case '%': {
+                    terminal.putchar('%');
+                    break;
+                }
+                default:
+                    terminal.putchar('%');
+                    terminal.putchar(*format);
+            }
+        } else {
+            terminal.putchar(*format);
+        }
+        format++;
+    }
+    return 0;
+}
+#ifdef __cplusplus
+}
+#endif

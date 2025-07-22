@@ -2,6 +2,7 @@
 #include <kernel/pic.h>
 #include <stdio.h>
 #include <kernel/port_io.h>
+#include <kernel/debug.h>
 
 #define ISR_COUNT 256 // Total number of ISRs
 
@@ -29,9 +30,7 @@ extern "C" void isr_handler(registers_t *regs)
     // Halt if it's a critical CPU exception
     if (regs->int_no < 32)
     {
-        printf("Critical CPU Exception! Halting...\n");
-        for (;;)
-            __asm__("hlt"); // Infinite loop to halt execution
+        PANIC("Unhandled CPU exception %d", regs->int_no);
     }
 }
 

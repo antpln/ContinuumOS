@@ -5,6 +5,7 @@
 #include "kernel/keyboard.h"
 #include "stdio.h"
 #include "kernel/shell.h"
+#include "kernel/debug.h"
 
 static bool shift_pressed = false;
 static bool caps_lock_active = false;
@@ -122,15 +123,15 @@ void keyboard_enable() {
     for (int i = 0; i < 1000; ++i) {
         if (inb(0x64) & 1) {
             uint8_t response = inb(0x60);
-            printf("Keyboard response: 0x%x\n", response);
+            debug("[KB] Keyboard response: 0x%x", response);
             if (response == 0xFA) return;
         }
     }
-    printf("Warning: No ACK received from keyboard\n");
+    error("[KB] Warning: No ACK received from keyboard");
 }
 
 void keyboard_install() {
-    printf("[KB] Enabling keyboard...\n");
+    debug("[KB] Enabling keyboard...");
     keyboard_enable();
     register_interrupt_handler(33, keyboard_callback);
     pic_unmask_irq(1);
@@ -139,7 +140,7 @@ void keyboard_install() {
 void keyboard_check_status() {
     uint8_t status = inb(0x64);
     if (status & 0x01) {
-        printf("Output buffer has data!\n");
+        debug("[KB] Output buffer has data!");
     }
 }
 

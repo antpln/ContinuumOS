@@ -16,13 +16,16 @@ LIBC_DIR = libc
 $(shell mkdir -p $(KERNEL_DEST))
 
 # Compiler flags
-CFLAGS = -O2 -g -std=gnu99 -ffreestanding -Wall -Wextra -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include
-CXXFLAGS = -O2 -g -ffreestanding -Wall -Wextra -fno-exceptions -fno-rtti -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include 
+CFLAGS = -O2 -g -std=gnu99 -ffreestanding -Wall -Wextra -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include -DDEBUG -DTEST
+CXXFLAGS = -O2 -g -ffreestanding -Wall -Wextra -fno-exceptions -fno-rtti -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include
+CXXFLAGS += $(CFLAGS)
 LDFLAGS = -ffreestanding -O2 -nostdlib
 
-# Source files
-CSOURCES = $(shell find $(SRC_DIR) -name '*.c')
-CPPSOURCES = $(shell find $(SRC_DIR) -name '*.cpp')
+CFLAGS += $(EXTRA_CFLAGS)
+
+# Source files (exclude toolchain build directories)
+CSOURCES = $(shell find $(SRC_DIR) -name '*.c' ! -path "*/binutils-*" ! -path "*/gcc-*" ! -path "*/build-*")
+CPPSOURCES = $(shell find $(SRC_DIR) -name '*.cpp' ! -path "*/binutils-*" ! -path "*/gcc-*" ! -path "*/build-*")
 ASMSOURCES = $(shell find $(BOOT_DIR) -name '*.s')
 KERNEL_ASMSOURCES = $(shell find $(KERNEL_DIR) -name '*.s')
 LIBC_CSOURCES = $(shell find $(LIBC_DIR) -type f -name '*.c')
@@ -54,6 +57,7 @@ directories:
 	@mkdir -p $(BUILD_DIR)/kernel
 	@mkdir -p $(BUILD_DIR)/boot
 	@mkdir -p $(BUILD_DIR)/libc
+	@mkdir -p $(BUILD_DIR)/libc/stdlib
 
 $(KERNEL_ELF): $(OBJECTS)
 	$(CXX) -T linker.ld -o $(KERNEL_DEST)/kernel.bin $(LDFLAGS) $(OBJECTS) -lgcc
@@ -75,13 +79,6 @@ $(BUILD_DIR)/kernel/%.o: $(KERNEL_DIR)/%.s
 	@mkdir -p $(dir $@)
 	$(AS) $< -o $@
 
-# Add .s files to the valid source extensions if not already present
-SRCEXTS += .s
-
-# Add assembly compilation rule
-%.o: %.s
-	$(AS) $< -o $@
-
 # Update libc compilation rules
 $(BUILD_DIR)/libc/%.o: $(LIBC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
@@ -97,8 +94,6 @@ iso: $(KERNEL_ELF)
 	mkdir -p isodir/boot/grub
 	cp $(KERNEL_DEST)/kernel.bin isodir/boot/kernel.bin
 	cp grub.cfg isodir/boot/grub/grub.cfg
-	$(CXX) -T linker.ld -o $(KERNEL_DEST)/kernel2.bin $(LDFLAGS) $(OBJECTS) -lgcc
-	cp $(KERNEL_DEST)/kernel2.bin isodir/boot/kernel.bin
 	grub-mkrescue -o kernel.iso isodir
 
 run: $(KERNEL_ELF)
@@ -116,7 +111,6 @@ clean:
 	rm -f kernel.iso
 	rm -f $(KERNEL_DEST)/kernel.bin
 	rm -f $(KERNEL_DEST)/kernel2.bin
-
 clean-all: clean
 	rm -f test_fat32.img
 

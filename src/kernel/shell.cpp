@@ -11,6 +11,7 @@
 #include <kernel/editor.h>
 #include <kernel/blockdev.h>
 #include <kernel/fat32.h>
+#include "kernel/memory.h"
 
 extern Terminal terminal;
 extern shell_command_t commands[];
@@ -80,6 +81,19 @@ const char* shell_history_prev(void) {
     return shell.history[shell.history_nav % SHELL_HISTORY_SIZE];
 }
 
+// Return the next command from history, or NULL if none
+const char* shell_history_next(void) {
+    if (shell.history_count == 0) return NULL;
+    if (shell.history_nav == -1) return NULL; // Not navigating
+    if (shell.history_nav < (int)shell.history_count - 1)
+        shell.history_nav++;
+    else {
+        shell.history_nav = -1;
+        return ""; // Clear input if at the end
+    }
+    return shell.history[shell.history_nav % SHELL_HISTORY_SIZE];
+}
+
 // Reset history navigation state
 void shell_history_reset(void) {
     shell.history_nav = -1;
@@ -120,6 +134,24 @@ void shell_handle_key(keyboard_event ke) {
             shell.index = strlen(shell.buffer);
             shell_print_prompt();
             printf("%s", shell.buffer);
+        }
+        return;
+    }
+
+    // Down arrow: next history
+    if (ke.down_arrow) {
+        const char* next = shell_history_next();
+        size_t len = SHELL_PROMPT_LEN + shell.index;
+        clear_line(len);
+        if (next && *next) {
+            safe_strncpy(shell.buffer, next, SHELL_BUFFER_SIZE);
+            shell.index = strlen(shell.buffer);
+            shell_print_prompt();
+            printf("%s", shell.buffer);
+        } else {
+            shell.buffer[0] = '\0';
+            shell.index = 0;
+            shell_print_prompt();
         }
         return;
     }
@@ -521,6 +553,15 @@ void cmd_fat32_cat(const char* args) {
     vfs_close(&file);
 }
 
+// Print memory usage information
+void cmd_meminfo(const char* args) {
+    uint32_t total = PhysicalMemoryManager::get_memory_size();
+    uint32_t free = PhysicalMemoryManager::get_free_frames() * PAGE_SIZE;
+    printf("Total memory: %u bytes\n", total);
+    printf("Free memory:  %u bytes\n", free);
+    printf("Used frames:  %u\n", PhysicalMemoryManager::used_frames);
+}
+
 // Command lookup table
 shell_command_t commands[] = {
     { "help",     cmd_help,     "Show available commands" },
@@ -543,5 +584,6 @@ shell_command_t commands[] = {
     { "fsinfo",    cmd_fat32_info, "Show filesystem info" },
     { "fat32ls",   cmd_fat32_ls,   "List FAT32 root directory (legacy)" },
     { "fat32cat",  cmd_fat32_cat,  "Read and display FAT32 file (legacy)" },
+    { "meminfo", cmd_meminfo, "Show memory usage info" },
     { NULL,        NULL,          NULL }
 };
