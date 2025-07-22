@@ -16,6 +16,7 @@
 #include "kernel/tests/memtest.h"
 #include "kernel/tests/pagetest.h"
 #include "kernel/tests/heaptest.h"
+#include "kernel/scheduler.h"
 
 #include "utils.h"
 #include <stdio.h> // Changed back to just stdio.h since include path is set in Makefile
@@ -39,6 +40,9 @@ extern "C"
        ~H| |/
             ~)";
 		terminal.initialize();
+
+		// Initialize the scheduler (round-robin)
+		scheduler_init();
 
 		// Initialize the Physical Memory Manager (PMM) before paging
 		PhysicalMemoryManager::initialize(multiboot_info);
