@@ -8,3 +8,5 @@ isodir/
 kernel.iso
 kernel/kernel.bin
 kernel/kernel2.bin
+rust_kernel/target/
+rust_kernel/Cargo.lock
