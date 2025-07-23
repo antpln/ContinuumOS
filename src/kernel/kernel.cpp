@@ -17,6 +17,7 @@
 #include "kernel/tests/pagetest.h"
 #include "kernel/tests/heaptest.h"
 #include "kernel/scheduler.h"
+#include <kernel/process.h>
 
 #include "utils.h"
 #include <stdio.h> // Changed back to just stdio.h since include path is set in Makefile
@@ -25,6 +26,7 @@
 extern "C"
 
 {
+        void shell_entry();
 #endif
 
 	Terminal terminal;
@@ -103,18 +105,16 @@ extern "C"
 			fs_add_child(root, readme);
 		}
 
-		keyboard_install();
-		// Initialize the PIT timer to 1000 Hz
-		init_timer(1000);
+                keyboard_install();
+                // Initialize the PIT timer to 1000 Hz
+                init_timer(1000);
 
-		shell_init();
+                Process* shell_proc = start_process("shell", shell_entry, 0, 8192);
+                (void)shell_proc;
 
-		__asm__ volatile("sti");
+                __asm__ volatile("sti");
 
-		while (1)
-		{
-			__asm__ volatile("hlt");
-		}
+                scheduler_start();
 	}
 
 #ifdef __cplusplus

@@ -15,7 +15,6 @@ int create_process(const char* name, void (*entry)(), int speculative) {
     p.speculative = speculative;
     p.logical_time = 0;
     p.alive = 1;
-    p.wait_hook = 0;
 
     // Set CPU entry point; stack should be set externally or by allocator
     p.current_state.context.eip = (uint32_t)entry;

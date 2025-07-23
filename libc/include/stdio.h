@@ -26,7 +26,6 @@ void close(int fd);
 // Keyboard input
 int getchar();
 int sprintf(char* str, const char* format, ...);
-int sys_get_io_event(IOEvent* out_event);
 
 #ifdef __cplusplus
 }

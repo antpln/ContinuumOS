@@ -29,8 +29,12 @@ void process_yield_for_event(Process* proc, HookType event_type, uint64_t event_
 // Called by event source to resume processes waiting for an event
 void scheduler_resume_processes_for_event(HookType event_type, uint64_t event_value);
 // Called on each tick for quantum-based scheduling
-void scheduler_on_tick();
+void scheduler_on_tick(registers_t* regs);
+// Force a context switch using saved registers
+void scheduler_force_switch();
 // Context switch to another process
 void context_switch(registers_t* regs);
+// Start executing the first scheduled process
+void scheduler_start();
 
 #endif // SCHEDULER_H

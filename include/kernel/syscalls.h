@@ -13,11 +13,13 @@ void sys_yield();
 // Yield and wait for a specific event (hook)
 void sys_yield_for_event(int hook_type, uint64_t trigger_value);
 
+#include "kernel/isr.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void syscall_dispatch(uint32_t syscall_num, uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4);
+void syscall_dispatch(registers_t* regs);
 
 #ifdef __cplusplus
 }

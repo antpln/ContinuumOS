@@ -10,8 +10,7 @@ volatile uint32_t timer_ticks = 0;
 // Called on every timer tick (IRQ0)
 void timer_handler(registers_t* regs) {
     timer_ticks++;
-    scheduler_on_tick();
-    context_switch(regs);
+    scheduler_on_tick(regs);
 }
 
 // Initialize the PIT timer to the given frequency.

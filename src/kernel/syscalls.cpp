@@ -70,29 +70,29 @@ int sys_get_io_event(IOEvent* out_event) {
 }
 
 void sys_yield() {
-    Process* proc = scheduler_current_process();
-    if (!proc) return;
-    // Mark process as not running for this quantum, but still eligible
-    // This is a cooperative yield; process remains alive
-    // Context switch should be triggered here
-    // For now, just return; context switch logic should be handled by the scheduler/interrupt handler
+    (void)scheduler_current_process();
+    scheduler_force_switch();
 }
 
 void sys_yield_for_event(int hook_type, uint64_t trigger_value) {
     Process* proc = scheduler_current_process();
     if (!proc) return;
     process_yield_for_event(proc, (HookType)hook_type, trigger_value);
-    // Context switch should be triggered here
-    // For now, just return; context switch logic should be handled by the scheduler/interrupt handler
+    scheduler_force_switch();
 }
 
-extern "C" void syscall_dispatch(uint32_t syscall_num, uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4) {
+extern "C" void syscall_dispatch(registers_t* regs) {
+    uint32_t syscall_num = regs->eax;
+    uint32_t arg1 = regs->ebx;
+    uint32_t arg2 = regs->ecx;
+    uint32_t arg3 = regs->edx;
+    uint32_t arg4 = regs->esi;
     switch (syscall_num) {
         case 0x80: // SYSCALL_YIELD
             sys_yield();
             break;
         case 0x81: // SYSCALL_YIELD_FOR_EVENT
-            sys_yield_for_event(arg1, arg2);
+            sys_yield_for_event((int)arg1, (uint64_t)arg2);
             break;
         case 0x82: // SYSCALL_START_PROCESS
             // arg1: name, arg2: entry, arg3: speculative, arg4: stack_size
