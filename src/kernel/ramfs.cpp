@@ -145,7 +145,7 @@ int fs_write(FSNode *file, size_t offset, size_t size, const uint8_t *buffer)
         uint8_t *new_data = (uint8_t *)krealloc(file->data, offset + size);
         if (!new_data)
         {
-            printf("Write error: Out of memory for '%s'", file->name);
+            error("Write error: Out of memory for '%s'", file->name);
             return -1;
         }
         file->data = new_data;
@@ -185,7 +185,7 @@ FSNode *fs_find_by_path(const char *path)
     if (!path || path[0] != '/')
         return NULL; // Ensure it's an absolute path
 
-    printf("[FS_FIND] Looking for path: %s\n", path);
+    debug("[FS_FIND] Looking for path: %s\n", path);
     
     FSNode *current = fs_get_root();
     char temp[VFS_MAX_NAME];
@@ -193,7 +193,7 @@ FSNode *fs_find_by_path(const char *path)
 
     // Handle root directory case
     if (strcmp(path, "/") == 0) {
-        printf("[FS_FIND] Returning root directory\n");
+        debug("[FS_FIND] Returning root directory\n");
         return current;
     }
     
@@ -207,28 +207,28 @@ FSNode *fs_find_by_path(const char *path)
             temp[i] = '\0'; // End of component
             if (strlen(temp) > 0)
             {
-                printf("[FS_FIND] Looking for child: '%s' in directory '%s'\n", temp, current->name);
+                debug("[FS_FIND] Looking for child: '%s' in directory '%s'\n", temp, current->name);
                 
                 // Handle special directory entries
                 if (strcmp(temp, ".") == 0) {
                     // Current directory - no change needed
-                    printf("[FS_FIND] Staying in current directory: '%s'\n", current->name);
+                    debug("[FS_FIND] Staying in current directory: '%s'\n", current->name);
                 } else if (strcmp(temp, "..") == 0) {
                     // Parent directory
                     if (current->parent) {
                         current = current->parent;
-                        printf("[FS_FIND] Moved to parent directory: '%s'\n", current->name);
+                        debug("[FS_FIND] Moved to parent directory: '%s'\n", current->name);
                     } else {
-                        printf("[FS_FIND] Already at root, .. has no effect\n");
+                        debug("[FS_FIND] Already at root, .. has no effect\n");
                     }
                 } else {
                     // Regular child lookup
                     current = fs_find_child(current, temp);
                     if (!current) {
-                        printf("[FS_FIND] Child '%s' not found\n", temp);
+                        debug("[FS_FIND] Child '%s' not found\n", temp);
                         return NULL; // Path not found
                     }
-                    printf("[FS_FIND] Found child: '%s', type=%d\n", current->name, current->type);
+                    debug("[FS_FIND] Found child: '%s', type=%d\n", current->name, current->type);
                 }
             }
             i = 0;
@@ -247,28 +247,28 @@ FSNode *fs_find_by_path(const char *path)
     // Handle last component if path doesn't end with '/'
     temp[i] = '\0';
     if (strlen(temp) > 0) {
-        printf("[FS_FIND] Looking for final child: '%s' in directory '%s'\n", temp, current->name);
+        debug("[FS_FIND] Looking for final child: '%s' in directory '%s'\n", temp, current->name);
         
         // Handle special directory entries
         if (strcmp(temp, ".") == 0) {
             // Current directory - no change needed
-            printf("[FS_FIND] Final component is current directory: '%s'\n", current->name);
+            debug("[FS_FIND] Final component is current directory: '%s'\n", current->name);
         } else if (strcmp(temp, "..") == 0) {
             // Parent directory
             if (current->parent) {
                 current = current->parent;
-                printf("[FS_FIND] Final component moved to parent directory: '%s'\n", current->name);
+                debug("[FS_FIND] Final component moved to parent directory: '%s'\n", current->name);
             } else {
-                printf("[FS_FIND] Final component: already at root, .. has no effect\n");
+                debug("[FS_FIND] Final component: already at root, .. has no effect\n");
             }
         } else {
             // Regular child lookup
             current = fs_find_child(current, temp);
             if (!current) {
-                printf("[FS_FIND] Final child '%s' not found\n", temp);
+                debug("[FS_FIND] Final child '%s' not found\n", temp);
                 return NULL;
             }
-            printf("[FS_FIND] Found final child: '%s', type=%d\n", current->name, current->type);
+            debug("[FS_FIND] Found final child: '%s', type=%d\n", current->name, current->type);
         }
     }
     
@@ -384,32 +384,32 @@ FSNode *fs_touch(const char *path)
     char parent_path[128], name[64];
     split_path(path, parent_path, name);
 
-    printf("[FS_TOUCH] Path: '%s' -> parent: '%s', name: '%s'\n", path, parent_path, name);
+    debug("[FS_TOUCH] Path: '%s' -> parent: '%s', name: '%s'\n", path, parent_path, name);
 
     FSNode *parent = fs_find_by_path(parent_path);
     if (!parent) {
-        printf("[FS_TOUCH] Parent not found: '%s'\n", parent_path);
+        error("[FS_TOUCH] Parent not found: '%s'\n", parent_path);
         return NULL;
     }
     if (parent->type != FS_DIRECTORY) {
-        printf("[FS_TOUCH] Parent is not a directory: '%s' (type=%d)\n", parent_path, parent->type);
+        error("[FS_TOUCH] Parent is not a directory: '%s' (type=%d)\n", parent_path, parent->type);
         return NULL;
     }
 
-    printf("[FS_TOUCH] Creating file node with FS_FILE=%d\n", FS_FILE);
+    debug("[FS_TOUCH] Creating file node with FS_FILE=%d\n", FS_FILE);
     FSNode *new_file = fs_create_node(name, FS_FILE);
     if (!new_file) {
-        printf("[FS_TOUCH] Failed to create node\n");
+        error("[FS_TOUCH] Failed to create node\n");
         return NULL;
     }
     
-    printf("[FS_TOUCH] Created node with type=%d\n", new_file->type);
+    debug("[FS_TOUCH] Created node with type=%d\n", new_file->type);
     new_file->data = (uint8_t *)kmalloc(1024); // Allocate 1KiB buffer
     new_file->size = 0;
     
-    printf("[FS_TOUCH] Before fs_add_child: node type=%d\n", new_file->type);
+    debug("[FS_TOUCH] Before fs_add_child: node type=%d\n", new_file->type);
     fs_add_child(parent, new_file);
-    printf("[FS_TOUCH] After fs_add_child: node type=%d\n", new_file->type);
+    debug("[FS_TOUCH] After fs_add_child: node type=%d\n", new_file->type);
     
     return new_file;
 }
@@ -437,29 +437,29 @@ void fs_free_node(FSNode* node) {
 // Remove a file
 int fs_remove(const char* path) {
     if (!path) {
-        printf("[FS_REMOVE] Invalid path\n");
+        error("[FS_REMOVE] Invalid path\n");
         return -1;
     }
     
-    printf("[FS_REMOVE] Removing file: %s\n", path);
+    debug("[FS_REMOVE] Removing file: %s\n", path);
     
     // Find the file
     FSNode* node = fs_find_by_path(path);
     if (!node) {
-        printf("[FS_REMOVE] File not found: %s\n", path);
+        error("[FS_REMOVE] File not found: %s\n", path);
         return -1;
     }
     
     // Check if it's a file
     if (node->type != FS_FILE) {
-        printf("[FS_REMOVE] Path is not a file: %s (type=%d)\n", path, node->type);
+        error("[FS_REMOVE] Path is not a file: %s (type=%d)\n", path, node->type);
         return -1;
     }
     
     // Check if file is currently open
     for (int i = 0; i < MAX_OPEN_FILES; i++) {
         if (fd_table[i].used && fd_table[i].node == node) {
-            printf("[FS_REMOVE] Cannot remove file: %s (file is open)\n", path);
+            error("[FS_REMOVE] Cannot remove file: %s (file is open)\n", path);
             return -1;
         }
     }
@@ -472,41 +472,41 @@ int fs_remove(const char* path) {
     // Free the node
     fs_free_node(node);
     
-    printf("[FS_REMOVE] File removed successfully: %s\n", path);
+    success("[FS_REMOVE] File removed successfully: %s\n", path);
     return 0;
 }
 
 // Remove a directory
 int fs_rmdir(const char* path) {
     if (!path) {
-        printf("[FS_RMDIR] Invalid path\n");
+        error("[FS_RMDIR] Invalid path\n");
         return -1;
     }
     
-    printf("[FS_RMDIR] Removing directory: %s\n", path);
+    debug("[FS_RMDIR] Removing directory: %s\n", path);
     
     // Cannot remove root directory
     if (strcmp(path, "/") == 0) {
-        printf("[FS_RMDIR] Cannot remove root directory\n");
+        error("[FS_RMDIR] Cannot remove root directory\n");
         return -1;
     }
     
     // Find the directory
     FSNode* node = fs_find_by_path(path);
     if (!node) {
-        printf("[FS_RMDIR] Directory not found: %s\n", path);
+        error("[FS_RMDIR] Directory not found: %s\n", path);
         return -1;
     }
     
     // Check if it's a directory
     if (node->type != FS_DIRECTORY) {
-        printf("[FS_RMDIR] Path is not a directory: %s (type=%d)\n", path, node->type);
+        error("[FS_RMDIR] Path is not a directory: %s (type=%d)\n", path, node->type);
         return -1;
     }
     
     // Check if directory is empty
     if (node->child_count > 0) {
-        printf("[FS_RMDIR] Directory not empty: %s (%zu children)\n", path, node->child_count);
+        error("[FS_RMDIR] Directory not empty: %s (%zu children)\n", path, node->child_count);
         return -1;
     }
     
@@ -518,7 +518,7 @@ int fs_rmdir(const char* path) {
             FSNode* current = open_node->parent;
             while (current) {
                 if (current == node) {
-                    printf("[FS_RMDIR] Cannot remove directory: %s (contains open files)\n", path);
+                    error("[FS_RMDIR] Cannot remove directory: %s (contains open files)\n", path);
                     return -1;
                 }
                 current = current->parent;
@@ -534,6 +534,6 @@ int fs_rmdir(const char* path) {
     // Free the node
     fs_free_node(node);
     
-    printf("[FS_RMDIR] Directory removed successfully: %s\n", path);
+    success("[FS_RMDIR] Directory removed successfully: %s\n", path);
     return 0;
 }

@@ -68,29 +68,29 @@ extern "C"
 		// Mount RamFS at root
 		ramfs_vfs_mount("/");
 		// Create /mnt directory for mount points
-		printf("[KERNEL] Creating /mnt directory...\n");
+		debug("Creating /mnt directory...");
 		if (vfs_mkdir("/mnt") == VFS_SUCCESS) {
-			printf("[KERNEL] /mnt directory created successfully\n");
+			success("/mnt directory created successfully");
 		} else {
-			printf("[KERNEL] Failed to create /mnt directory\n");
+			error("Failed to create /mnt directory");
 		}
 		// Try to mount FAT32 if available
 		fat32_vfs_mount("/mnt/fat32", 0);
 		// Create some built-in files using VFS
-		printf("[KERNEL] Creating /README file via VFS...\n");
+		debug("Creating /README file via VFS...");
 		if (vfs_create("/README") == VFS_SUCCESS) {
-			printf("[KERNEL] README file created successfully\n");
+			success("README file created successfully");
 			
 			// Write content to the file
 			vfs_file_t file;
 			if (vfs_open("/README", &file) == VFS_SUCCESS) {
 				const char *msg = "Welcome to ContinuumOS!";
 				int bytes_written = vfs_write(&file, msg, strlen(msg));
-				printf("[KERNEL] Wrote %d bytes to README\n", bytes_written);
+				debug("Wrote %d bytes to README", bytes_written);
 				vfs_close(&file);
 			}
 		} else {
-			printf("[KERNEL] Failed to create README file\n");
+			error("Failed to create README file");
 		}
 		#ifdef TEST
 		MemoryTester mem_tester;
