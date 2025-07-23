@@ -2,7 +2,9 @@
 #include "kernel/syscalls.h"
 #include "kernel/keyboard.h"
 #include "kernel/process.h"
+#include "kernel/scheduler.h"
 #include <stddef.h>
+#include <stdint.h>
 
 #define KEYBOARD_BUFFER_SIZE 128
 static char keyboard_buffer[KEYBOARD_BUFFER_SIZE];
@@ -65,4 +67,40 @@ int sys_get_io_event(IOEvent* out_event) {
     Process* proc = scheduler_current_process();
     if (!proc) return 0;
     return pop_io_event(proc, out_event);
+}
+
+void sys_yield() {
+    Process* proc = scheduler_current_process();
+    if (!proc) return;
+    // Mark process as not running for this quantum, but still eligible
+    // This is a cooperative yield; process remains alive
+    // Context switch should be triggered here
+    // For now, just return; context switch logic should be handled by the scheduler/interrupt handler
+}
+
+void sys_yield_for_event(int hook_type, uint64_t trigger_value) {
+    Process* proc = scheduler_current_process();
+    if (!proc) return;
+    process_yield_for_event(proc, (HookType)hook_type, trigger_value);
+    // Context switch should be triggered here
+    // For now, just return; context switch logic should be handled by the scheduler/interrupt handler
+}
+
+extern "C" void syscall_dispatch(uint32_t syscall_num, uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4) {
+    switch (syscall_num) {
+        case 0x80: // SYSCALL_YIELD
+            sys_yield();
+            break;
+        case 0x81: // SYSCALL_YIELD_FOR_EVENT
+            sys_yield_for_event(arg1, arg2);
+            break;
+        case 0x82: // SYSCALL_START_PROCESS
+            // arg1: name, arg2: entry, arg3: speculative, arg4: stack_size
+            start_process((const char*)arg1, (void (*)())arg2, (int)arg3, (uint32_t)arg4);
+            break;
+        // ...other syscalls...
+        default:
+            // Unknown syscall
+            break;
+    }
 }

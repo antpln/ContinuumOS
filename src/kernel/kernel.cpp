@@ -54,6 +54,7 @@ extern "C"
 
 		// Initialize the IDT
 		init_idt();
+		init_syscall_handler();
 
 		// Initialize virtual memory management
 		vmm_init();

@@ -26,6 +26,7 @@ typedef struct ProcessState {
 typedef void (*KeyboardHandler)(keyboard_event);
 
 #define MAX_EVENT_QUEUE_SIZE 128
+#define MAX_HOOKS_PER_PROCESS 8
 
 typedef enum {
     EVENT_NONE = 0,
@@ -51,20 +52,30 @@ typedef struct Process {
     int pid;
     const char* name;
     ProcessState current_state;
-    ProcessState* saved_state;
     int alive;
     int speculative;
     uint64_t logical_time;
-    Hook* wait_hook;
+    Hook hooks[MAX_HOOKS_PER_PROCESS]; // Array of hooks
+    int hook_count;
     EventQueue io_events; // Per-process I/O event queue
     KeyboardHandler keyboard_handler; // Per-process keyboard callback
+    int tickets; // Number of tickets for lottery scheduling
 } Process;
 
 int create_process(const char* name, void (*entry)(), int speculative);
 void kill_process(Process* proc);
-ProcessState* save_continuation(const Process* p);
-void restore_continuation(Process* p, const ProcessState* state);
 void register_keyboard_handler(Process* proc, KeyboardHandler handler);
+void set_process_tickets(Process* proc, int tickets); // Set tickets for a process
+
+// Register a hook for a process
+int process_register_hook(Process* proc, HookType type, uint64_t trigger_value);
+// Remove a hook from a process
+int process_remove_hook(Process* proc, HookType type, uint64_t trigger_value);
+// Check if a process has a matching hook
+int process_has_matching_hook(Process* proc, HookType type, uint64_t value);
+
+// Start a process (kernel or userspace)
+Process* start_process(const char* name, void (*entry)(), int speculative, uint32_t stack_size);
 
 #ifdef __cplusplus
 }

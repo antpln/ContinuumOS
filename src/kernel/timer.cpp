@@ -1,14 +1,17 @@
 #include "kernel/timer.h"
 #include "kernel/port_io.h"
 #include "kernel/isr.h"
+#include "kernel/scheduler.h"
 #include <stdio.h>
 #include <kernel/debug.h>
 
 volatile uint32_t timer_ticks = 0;
 
-// Timer interrupt handler: increments tick count and prints every 100 ticks.
+// Called on every timer tick (IRQ0)
 void timer_handler(registers_t* regs) {
     timer_ticks++;
+    scheduler_on_tick();
+    context_switch(regs);
 }
 
 // Initialize the PIT timer to the given frequency.

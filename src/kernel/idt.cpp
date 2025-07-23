@@ -43,3 +43,10 @@ void idt_set_gate(uint8_t num, uint32_t offset, uint16_t selector, uint8_t flags
 
 }
 
+extern "C" void _syscall_handler();
+
+void init_syscall_handler() {
+    // Set IDT entry for syscall interrupt (0x80)
+    idt_set_gate(0x80, (uint32_t)_syscall_handler, 0x08, 0x8E);
+}
+
