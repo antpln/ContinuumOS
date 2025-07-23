@@ -105,8 +105,14 @@ void keyboard_callback(registers_t *regs) {
         io_event.type = EVENT_KEYBOARD;
         io_event.data.keyboard = event;
         push_io_event(proc, io_event);
+
+        if (proc->keyboard_handler)
+            proc->keyboard_handler(event);
+        else
+            shell_handle_key(event);
+    } else {
+        shell_handle_key(event);
     }
-    shell_handle_key(event);
 }
 
 void wait_for_input_clear() {

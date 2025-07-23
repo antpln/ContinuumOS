@@ -4,6 +4,8 @@
 #include <string.h>
 #include <kernel/heap.h>
 #include <kernel/vga.h>
+#include <kernel/scheduler.h>
+#include <kernel/process.h>
 #include <utils.h>
 
 extern Terminal terminal;
@@ -123,9 +125,15 @@ void Editor::exit(bool save) {
     // Clear the status-bar row
     int y = terminal.get_vga_height() - 1;
     for (int x = 0; x < EDITOR_LINE_LENGTH; ++x) {
-        terminal.put_at(' ',terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK),x, y);
+        terminal.put_at(' ',
+                        terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK),
+                        x, y);
     }
     printf("nutshell> ");
+
+    Process* proc = scheduler_current_process();
+    if (proc)
+        kill_process(proc);
 }
 
 // Draw a single line in the editor
@@ -373,4 +381,21 @@ bool editor_is_active() {
 }
 void editor_handle_key(keyboard_event ke) {
     editor_instance.handle_key(ke);
+}
+
+// Globals used to pass parameters from the shell
+const char* editor_filename_global = nullptr;
+FSNode* editor_dir_global = nullptr;
+
+extern "C" void editor_entry() {
+    Process* proc = scheduler_current_process();
+    if (proc)
+        register_keyboard_handler(proc, editor_handle_key);
+    editor_start(editor_filename_global, editor_dir_global);
+    while (editor_is_active()) {
+        asm volatile("hlt");
+    }
+    if (proc)
+        kill_process(proc);
+    while (1) asm volatile("hlt");
 }

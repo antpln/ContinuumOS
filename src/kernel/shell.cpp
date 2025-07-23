@@ -8,7 +8,8 @@
 #include <kernel/heap.h>
 #include <kernel/vga.h>      
 #include <kernel/shell.h>
-#include <kernel/editor.h>
+#include "editor_process.h"
+#include <kernel/process.h>
 #include "kernel/memory.h"
 
 extern Terminal terminal;
@@ -116,12 +117,8 @@ void shell_process_command(const char* cmd) {
     printf("Command not found: %s\n", name);
 }
 
-// Handle a keyboard event (shell mode or forward to editor)
+// Handle a keyboard event for the shell
 void shell_handle_key(keyboard_event ke) {
-    if (editor_is_active()) {
-        editor_handle_key(ke);
-        return;
-    }
     if (!shell.input_enabled) return;
 
     // Up arrow: previous history
@@ -173,8 +170,7 @@ void shell_handle_key(keyboard_event ke) {
         shell_process_command(shell.buffer);
         shell.index = 0;
         shell_history_reset();
-        if (!editor_is_active())
-            shell_print_prompt();
+        shell_print_prompt();
         return;
     }
 
@@ -362,11 +358,13 @@ void cmd_history(const char* args) {
 // Open file in editor
 void cmd_edit(const char* args) {
     if (!args || !*args) {
-        printf("Usage: edit <file>\n");
+        printf("Usage: editor <file>\n");
         return;
     }
     if (!shell.cwd) shell.cwd = fs_get_root();
-    editor_start(args, shell.cwd);
+    editor_filename_global = args;
+    editor_dir_global = shell.cwd;
+    start_process("editor", editor_entry, 0, 8192);
 }
 
 // Print memory usage information
@@ -392,7 +390,17 @@ shell_command_t commands[] = {
     { "pwd",     cmd_pwd,     "Print working directory" },
     { "uptime",  cmd_uptime,  "Show system uptime" },
     { "history", cmd_history, "Show command history" },
-    { "edit",    cmd_edit,    "Edit a file" },
+    { "editor",  cmd_edit,    "Edit a file" },
     { "meminfo", cmd_meminfo, "Show memory usage info" },
     { NULL,      NULL,        NULL }
 };
+
+extern "C" void shell_entry() {
+    Process* proc = scheduler_current_process();
+    if (proc)
+        register_keyboard_handler(proc, shell_handle_key);
+    shell_init();
+    while (1) {
+        asm volatile("hlt");
+    }
+}

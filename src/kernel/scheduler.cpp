@@ -179,14 +179,31 @@ void context_switch(registers_t* regs) {
     last_regs = regs;
 }
 
-void scheduler_on_tick() {
+void scheduler_on_tick(registers_t* regs) {
+    last_regs = regs;
     quantum_counter++;
     if (quantum_counter >= SCHEDULER_QUANTUM_TICKS) {
         quantum_counter = 0;
-        Process* next = scheduler_next_process();
-        if (next && next != scheduler_current_process()) {
-            // TODO: Save current process state, switch to next process
-            // Context switch logic goes here
-        }
+        context_switch(regs);
     }
+}
+
+void scheduler_force_switch() {
+    if (last_regs)
+        context_switch(last_regs);
+}
+
+void scheduler_start() {
+    Process* proc = scheduler_current_process();
+    if (!proc) return;
+    asm volatile(
+        "mov %0, %%esp\n"
+        "mov %1, %%ebp\n"
+        "jmp *%2\n"
+        :
+        : "r"(proc->current_state.context.esp),
+          "r"(proc->current_state.context.ebp),
+          "r"(proc->current_state.context.eip)
+        : "memory"
+    );
 }

@@ -1,3 +1,5 @@
+#ifndef KERNEL_PROCESS_H
+#define KERNEL_PROCESS_H
 #include <stddef.h>
 #include <stdint.h>
 #include "kernel/hooks.h"
@@ -80,3 +82,5 @@ Process* start_process(const char* name, void (*entry)(), int speculative, uint3
 #ifdef __cplusplus
 }
 #endif
+
+#endif // KERNEL_PROCESS_H
