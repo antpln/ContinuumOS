@@ -1,5 +1,6 @@
 #include "kernel/ide.h"
 #include "kernel/port_io.h"
+#include "kernel/debug.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -23,11 +24,11 @@ static int ide_wait_ready(uint16_t base_port) {
             return 0;
         }
         if (status & IDE_STATUS_ERR) {
-            printf("[IDE] Error status: 0x%x\n", status);
+            error("[IDE] Error status: 0x%x", status);
             return -1;
         }
     }
-    printf("[IDE] Timeout waiting for ready\n");
+    error("[IDE] Timeout waiting for ready");
     return -1;
 }
 
@@ -41,11 +42,11 @@ static int ide_wait_drq(uint16_t base_port) {
             return 0;
         }
         if (status & IDE_STATUS_ERR) {
-            printf("[IDE] Error status during DRQ wait: 0x%x\n", status);
+            error("[IDE] Error status during DRQ wait: 0x%x", status);
             return -1;
         }
     }
-    printf("[IDE] Timeout waiting for DRQ\n");
+    error("[IDE] Timeout waiting for DRQ");
     return -1;
 }
 
@@ -94,12 +95,12 @@ int ide_identify(uint8_t drive_id, uint16_t* buffer) {
 
 int ide_read_sectors(uint8_t drive_id, uint32_t lba, uint8_t count, uint16_t* buffer) {
     if (drive_id >= IDE_MAX_DRIVES || !drives[drive_id].exists) {
-        printf("[IDE] Invalid drive: %d\n", drive_id);
+        error("[IDE] Invalid drive: %d", drive_id);
         return -1;
     }
     
     if (count == 0 || count > 256) {
-        printf("[IDE] Invalid sector count: %d\n", count);
+        error("[IDE] Invalid sector count: %d", count);
         return -1;
     }
     
@@ -107,7 +108,7 @@ int ide_read_sectors(uint8_t drive_id, uint32_t lba, uint8_t count, uint16_t* bu
     uint16_t base_port = drive->base_port;
     uint8_t drive_num = drive->drive_num;
     
-    printf("[IDE] Reading %d sectors from LBA %u on drive %d\n", count, lba, drive_id);
+    debug("[IDE] Reading %d sectors from LBA %u on drive %d", count, lba, drive_id);
     
     ide_select_drive(base_port, drive_num);
     
@@ -132,7 +133,7 @@ int ide_read_sectors(uint8_t drive_id, uint32_t lba, uint8_t count, uint16_t* bu
     // Read each sector
     for (int sector = 0; sector < count; sector++) {
         if (ide_wait_drq(base_port) != 0) {
-            printf("[IDE] Failed to read sector %d\n", sector);
+            error("[IDE] Failed to read sector %d", sector);
             return -1;
         }
         
@@ -142,13 +143,13 @@ int ide_read_sectors(uint8_t drive_id, uint32_t lba, uint8_t count, uint16_t* bu
         }
     }
     
-    printf("[IDE] Successfully read %d sectors\n", count);
+    success("[IDE] Successfully read %d sectors", count);
     return 0;
 }
 
 int ide_write_sectors(uint8_t drive_id, uint32_t lba, uint8_t count, uint16_t* buffer) {
     // Write functionality - to be implemented later
-    printf("[IDE] Write functionality not yet implemented\n");
+    error("[IDE] Write functionality not yet implemented");
     return -1;
 }
 
@@ -172,7 +173,7 @@ static int ide_detect_drive(uint16_t base_port, uint8_t drive_num) {
         // Calculate total sectors (LBA mode)
         drives[drive_count].sectors = *((uint32_t*)&identify_buffer[60]);
         
-        printf("[IDE] Drive %d detected: %u sectors (%u MB)\n", 
+        success("[IDE] Drive %d detected: %u sectors (%u MB)", 
                drive_count, drives[drive_count].sectors,
                (drives[drive_count].sectors * 512) / (1024 * 1024));
         
@@ -185,22 +186,22 @@ static int ide_detect_drive(uint16_t base_port, uint8_t drive_num) {
 }
 
 int ide_init(void) {
-    printf("[IDE] Initializing IDE controller\n");
+    debug("[IDE] Initializing IDE controller");
     
     drive_count = 0;
     memset(drives, 0, sizeof(drives));
     
     // Detect drives on primary IDE controller
-    printf("[IDE] Scanning primary IDE controller (0x1F0)\n");
+    debug("[IDE] Scanning primary IDE controller (0x1F0)");
     ide_detect_drive(IDE_PRIMARY_BASE, IDE_DRIVE_MASTER);
     ide_detect_drive(IDE_PRIMARY_BASE, IDE_DRIVE_SLAVE);
     
     // Detect drives on secondary IDE controller
-    printf("[IDE] Scanning secondary IDE controller (0x170)\n");
+    debug("[IDE] Scanning secondary IDE controller (0x170)");
     ide_detect_drive(IDE_SECONDARY_BASE, IDE_DRIVE_MASTER);
     ide_detect_drive(IDE_SECONDARY_BASE, IDE_DRIVE_SLAVE);
     
-    printf("[IDE] Found %d drives\n", drive_count);
+    success("[IDE] Found %d drives", drive_count);
     return drive_count;
 }
 

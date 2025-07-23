@@ -19,7 +19,7 @@ void register_interrupt_handler(uint8_t n, isr_t handler)
 extern "C" void isr_handler(registers_t *regs)
 {
     // Print the interrupt code (exception number)
-    printf("ISR Exception: Interrupt %d, Error Code: %d\n", regs->int_no, regs->err_code);
+    error("ISR Exception: Interrupt %d, Error Code: %d", regs->int_no, regs->err_code);
 
     // Handle critical exceptions like page faults (Interrupt 14)
     if(interrupt_handlers[regs->int_no]) {

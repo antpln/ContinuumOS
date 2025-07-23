@@ -1,5 +1,6 @@
 #include "kernel/vfs.h"
 #include "kernel/fat32.h"
+#include "kernel/debug.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -9,7 +10,7 @@ static char current_working_directory[VFS_MAX_PATH];
 static uint8_t vfs_initialized = 0;
 
 int vfs_init(void) {
-    printf("[VFS] Initializing Virtual File System\n");
+    debug("[VFS] Initializing Virtual File System");
     
     // Clear mount table
     memset(mounts, 0, sizeof(mounts));
@@ -21,34 +22,34 @@ int vfs_init(void) {
     strcpy(current_working_directory, "/");
     
     vfs_initialized = 1;
-    printf("[VFS] VFS initialized successfully\n");
+    success("[VFS] VFS initialized successfully");
     return VFS_SUCCESS;
 }
 
 int vfs_mount(const char* mountpoint, uint8_t fs_type, uint8_t device_id, 
               vfs_operations_t* ops, void* fs_data) {
     if (!vfs_initialized) {
-        printf("[VFS] VFS not initialized\n");
+        error("[VFS] VFS not initialized");
         return VFS_ERROR;
     }
     
     if (!mountpoint || !ops) {
-        printf("[VFS] Invalid mount parameters\n");
+        error("[VFS] Invalid mount parameters");
         return VFS_ERROR;
     }
     
-    printf("[VFS] Mounting filesystem type %d at %s\n", fs_type, mountpoint);
+    debug("[VFS] Mounting filesystem type %d at %s", fs_type, mountpoint);
     
     // Validate filesystem type
     if (fs_type != VFS_FS_RAMFS && fs_type != VFS_FS_FAT32) {
-        printf("[VFS] Unsupported filesystem type: %d\n", fs_type);
+        error("[VFS] Unsupported filesystem type: %d", fs_type);
         return VFS_ERROR;
     }
     
     // Check if mountpoint already exists
     for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
         if (mounts[i].mounted && strcmp(mounts[i].mountpoint, mountpoint) == 0) {
-            printf("[VFS] Mountpoint %s already mounted\n", mountpoint);
+            error("[VFS] Mountpoint %s already mounted", mountpoint);
             return VFS_ALREADY_MOUNTED;
         }
     }
@@ -63,12 +64,12 @@ int vfs_mount(const char* mountpoint, uint8_t fs_type, uint8_t device_id,
             mounts[i].fs_data = fs_data;
             mounts[i].mounted = 1;
             
-            printf("[VFS] Successfully mounted filesystem at %s\n", mountpoint);
+            success("[VFS] Successfully mounted filesystem at %s", mountpoint);
             return VFS_SUCCESS;
         }
     }
     
-    printf("[VFS] No free mount slots\n");
+    error("[VFS] No free mount slots");
     return VFS_NO_SPACE;
 }
 
@@ -77,7 +78,7 @@ int vfs_unmount(const char* mountpoint) {
         return VFS_ERROR;
     }
     
-    printf("[VFS] Unmounting %s\n", mountpoint);
+    debug("[VFS] Unmounting %s", mountpoint);
     
     // Find mount point
     for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
@@ -93,17 +94,17 @@ int vfs_unmount(const char* mountpoint) {
             if (mounts[i].fs_type == VFS_FS_FAT32) {
                 int result = fat32_unmount();
                 if (result != 0) {
-                    printf("[VFS] Warning: FAT32 unmount returned error %d\n", result);
+                    error("[VFS] Warning: FAT32 unmount returned error %d", result);
                 }
             }
             
             mounts[i].mounted = 0;
-            printf("[VFS] Successfully unmounted %s\n", mountpoint);
+            success("[VFS] Successfully unmounted %s", mountpoint);
             return VFS_SUCCESS;
         }
     }
     
-    printf("[VFS] Mountpoint %s not found\n", mountpoint);
+    error("[VFS] Mountpoint %s not found", mountpoint);
     return VFS_NOT_FOUND;
 }
 
@@ -173,22 +174,22 @@ int vfs_resolve_path(const char* path, vfs_mount_t** mount, char* relative_path)
 
 int vfs_list_mounts(void) {
     if (!vfs_initialized) {
-        printf("[VFS] VFS not initialized\n");
+        error("[VFS] VFS not initialized");
         return 0;
     }
     
-    printf("[VFS] Current mount points:\n");
+    debug("[VFS] Current mount points:");
     int count = 0;
     for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
         if (mounts[i].mounted) {
-            printf("  %s (type %d, device %d)\n", 
+            debug("  %s (type %d, device %d)", 
                    mounts[i].mountpoint, mounts[i].fs_type, mounts[i].device_id);
             count++;
         }
     }
     
     if (count == 0) {
-        printf("  No filesystems mounted\n");
+        debug("  No filesystems mounted");
     }
     
     return count;
@@ -229,7 +230,7 @@ int vfs_chdir(const char* path) {
     // Update current working directory with the normalized path
     strcpy(current_working_directory, normalized_path);
     
-    printf("[VFS] Changed directory to %s\n", current_working_directory);
+    success("[VFS] Changed directory to %s", current_working_directory);
     return VFS_SUCCESS;
 }
 
@@ -243,20 +244,20 @@ int vfs_open(const char* path, vfs_file_t* file) {
         return VFS_ERROR;
     }
     
-    printf("[VFS] Opening file: %s\n", path);
+    debug("[VFS] Opening file: %s", path);
     
     vfs_mount_t* mount;
     char relative_path[VFS_MAX_PATH];
     
     if (vfs_resolve_path(path, &mount, relative_path) != VFS_SUCCESS) {
-        printf("[VFS] Failed to resolve path: %s\n", path);
+        error("[VFS] Failed to resolve path: %s", path);
         return VFS_NOT_FOUND;
     }
     
-    printf("[VFS] Path resolved: %s -> mount=%p, relative_path='%s'\n", path, mount, relative_path);
+    debug("[VFS] Path resolved: %s -> mount=%p, relative_path='%s'", path, mount, relative_path);
     
     if (!mount->ops || !mount->ops->open) {
-        printf("[VFS] Filesystem does not support open operation\n");
+        error("[VFS] Filesystem does not support open operation");
         return VFS_ERROR;
     }
     
@@ -270,7 +271,7 @@ int vfs_open(const char* path, vfs_file_t* file) {
     }
     
     if (!vfs_handle) {
-        printf("[VFS] No free file handles available\n");
+        error("[VFS] No free file handles available");
         return VFS_NO_SPACE;
     }
     
@@ -281,12 +282,12 @@ int vfs_open(const char* path, vfs_file_t* file) {
     if (result == VFS_SUCCESS) {
         // Copy the VFS handle to user's file structure
         *file = *vfs_handle;
-        printf("[VFS] Successfully opened file: %s\n", path);
+        success("[VFS] Successfully opened file: %s", path);
     } else {
         // Clear the VFS handle on failure
         vfs_handle->in_use = 0;
         vfs_handle->mount = NULL;
-        printf("[VFS] Failed to open file: %s\n", path);
+        error("[VFS] Failed to open file: %s", path);
     }
     
     return result;
@@ -356,18 +357,18 @@ int vfs_readdir(const char* path, vfs_dirent_t* entries, int max_entries) {
         return VFS_ERROR;
     }
     
-    printf("[VFS] Reading directory: %s\n", path);
+    debug("[VFS] Reading directory: %s", path);
     
     vfs_mount_t* mount;
     char relative_path[VFS_MAX_PATH];
     
     if (vfs_resolve_path(path, &mount, relative_path) != VFS_SUCCESS) {
-        printf("[VFS] Failed to resolve path: %s\n", path);
+        error("[VFS] Failed to resolve path: %s", path);
         return VFS_NOT_FOUND;
     }
     
     if (!mount->ops || !mount->ops->readdir) {
-        printf("[VFS] Filesystem does not support readdir operation\n");
+        error("[VFS] Filesystem does not support readdir operation");
         return VFS_ERROR;
     }
     
@@ -379,18 +380,18 @@ int vfs_mkdir(const char* path) {
         return VFS_ERROR;
     }
     
-    printf("[VFS] Creating directory: %s\n", path);
+    debug("[VFS] Creating directory: %s", path);
     
     vfs_mount_t* mount;
     char relative_path[VFS_MAX_PATH];
     
     if (vfs_resolve_path(path, &mount, relative_path) != VFS_SUCCESS) {
-        printf("[VFS] Failed to resolve path: %s\n", path);
+        error("[VFS] Failed to resolve path: %s", path);
         return VFS_NOT_FOUND;
     }
     
     if (!mount->ops || !mount->ops->mkdir) {
-        printf("[VFS] Filesystem does not support mkdir operation\n");
+        error("[VFS] Filesystem does not support mkdir operation");
         return VFS_ERROR;
     }
     
@@ -402,18 +403,18 @@ int vfs_rmdir(const char* path) {
         return VFS_ERROR;
     }
     
-    printf("[VFS] Removing directory: %s\n", path);
+    debug("[VFS] Removing directory: %s", path);
     
     vfs_mount_t* mount;
     char relative_path[VFS_MAX_PATH];
     
     if (vfs_resolve_path(path, &mount, relative_path) != VFS_SUCCESS) {
-        printf("[VFS] Failed to resolve path: %s\n", path);
+        error("[VFS] Failed to resolve path: %s", path);
         return VFS_NOT_FOUND;
     }
     
     if (!mount->ops || !mount->ops->rmdir) {
-        printf("[VFS] Filesystem does not support rmdir operation\n");
+        error("[VFS] Filesystem does not support rmdir operation");
         return VFS_ERROR;
     }
     
@@ -425,18 +426,18 @@ int vfs_create(const char* path) {
         return VFS_ERROR;
     }
     
-    printf("[VFS] Creating file: %s\n", path);
+    debug("[VFS] Creating file: %s", path);
     
     vfs_mount_t* mount;
     char relative_path[VFS_MAX_PATH];
     
     if (vfs_resolve_path(path, &mount, relative_path) != VFS_SUCCESS) {
-        printf("[VFS] Failed to resolve path: %s\n", path);
+        error("[VFS] Failed to resolve path: %s", path);
         return VFS_NOT_FOUND;
     }
     
     if (!mount->ops || !mount->ops->create) {
-        printf("[VFS] Filesystem does not support create operation\n");
+        error("[VFS] Filesystem does not support create operation");
         return VFS_ERROR;
     }
     
@@ -448,18 +449,18 @@ int vfs_remove(const char* path) {
         return VFS_ERROR;
     }
     
-    printf("[VFS] Removing file: %s\n", path);
+    debug("[VFS] Removing file: %s", path);
     
     vfs_mount_t* mount;
     char relative_path[VFS_MAX_PATH];
     
     if (vfs_resolve_path(path, &mount, relative_path) != VFS_SUCCESS) {
-        printf("[VFS] Failed to resolve path: %s\n", path);
+        error("[VFS] Failed to resolve path: %s", path);
         return VFS_NOT_FOUND;
     }
     
     if (!mount->ops || !mount->ops->remove) {
-        printf("[VFS] Filesystem does not support remove operation\n");
+        error("[VFS] Filesystem does not support remove operation");
         return VFS_ERROR;
     }
     

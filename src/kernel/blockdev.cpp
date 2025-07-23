@@ -1,5 +1,6 @@
 #include "kernel/blockdev.h"
 #include "kernel/ide.h"
+#include "kernel/debug.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -7,7 +8,7 @@ static blockdev_info_t devices[MAX_BLOCK_DEVICES];
 static uint8_t device_count = 0;
 
 int blockdev_init(void) {
-    printf("[BLOCKDEV] Initializing block device subsystem\n");
+    debug("[BLOCKDEV] Initializing block device subsystem");
     
     device_count = 0;
     memset(devices, 0, sizeof(devices));
@@ -33,18 +34,18 @@ int blockdev_init(void) {
         }
     }
     
-    printf("[BLOCKDEV] Registered %d block devices\n", device_count);
+    success("[BLOCKDEV] Registered %d block devices", device_count);
     return device_count;
 }
 
 int blockdev_register(uint8_t type, uint8_t device_id, blockdev_info_t* info) {
     if (device_count >= MAX_BLOCK_DEVICES) {
-        printf("[BLOCKDEV] Maximum devices reached\n");
+        error("[BLOCKDEV] Maximum devices reached");
         return BLOCKDEV_ERROR;
     }
     
     devices[device_count] = *info;
-    printf("[BLOCKDEV] Registered device %d: %s (%u sectors, %u bytes/sector)\n",
+    debug("[BLOCKDEV] Registered device %d: %s (%u sectors, %u bytes/sector)",
            device_count, info->name, info->sector_count, info->sector_size);
     
     device_count++;
@@ -53,18 +54,18 @@ int blockdev_register(uint8_t type, uint8_t device_id, blockdev_info_t* info) {
 
 int blockdev_read(uint8_t device, uint32_t sector, uint8_t count, void* buffer) {
     if (device >= device_count || !devices[device].present) {
-        printf("[BLOCKDEV] Invalid device: %d\n", device);
+        error("[BLOCKDEV] Invalid device: %d", device);
         return BLOCKDEV_NOT_FOUND;
     }
     
     blockdev_info_t* dev = &devices[device];
     
     if (sector >= dev->sector_count) {
-        printf("[BLOCKDEV] Sector %u out of range (max: %u)\n", sector, dev->sector_count - 1);
+        error("[BLOCKDEV] Sector %u out of range (max: %u)", sector, dev->sector_count - 1);
         return BLOCKDEV_ERROR;
     }
     
-    printf("[BLOCKDEV] Reading %d sectors from sector %u on device %d (%s)\n",
+    debug("[BLOCKDEV] Reading %d sectors from sector %u on device %d (%s)",
            count, sector, device, dev->name);
     
     switch (dev->type) {
@@ -72,7 +73,7 @@ int blockdev_read(uint8_t device, uint32_t sector, uint8_t count, void* buffer) 
             return ide_read_sectors(dev->device_id, sector, count, (uint16_t*)buffer);
         
         default:
-            printf("[BLOCKDEV] Unsupported device type: %d\n", dev->type);
+            error("[BLOCKDEV] Unsupported device type: %d", dev->type);
             return BLOCKDEV_ERROR;
     }
 }
@@ -101,10 +102,10 @@ blockdev_info_t* blockdev_get_info(uint8_t device) {
 }
 
 int blockdev_list_devices(void) {
-    printf("[BLOCKDEV] Available block devices:\n");
+    debug("[BLOCKDEV] Available block devices:");
     for (int i = 0; i < device_count; i++) {
         if (devices[i].present) {
-            printf("  %d: %s - %u sectors (%u MB)\n",
+            debug("  %d: %s - %u sectors (%u MB)",
                    i, devices[i].name, devices[i].sector_count,
                    (devices[i].sector_count * devices[i].sector_size) / (1024 * 1024));
         }

@@ -1,6 +1,7 @@
 #include "kernel/fat32.h"
 #include "kernel/blockdev.h"
 #include "kernel/heap.h"
+#include "kernel/debug.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -9,7 +10,7 @@ static fat32_file_t open_files[FAT32_MAX_OPEN_FILES];
 static uint8_t mounted = 0;
 
 int fat32_init(void) {
-    printf("[FAT32] Initializing FAT32 filesystem support\n");
+    debug("[FAT32] Initializing FAT32 filesystem support");
     
     memset(&fs_info, 0, sizeof(fs_info));
     memset(open_files, 0, sizeof(open_files));
@@ -21,36 +22,36 @@ int fat32_init(void) {
 static int fat32_validate_boot_sector(fat32_boot_sector_t* boot) {
     // Check signature
     if (boot->signature != FAT32_SIGNATURE) {
-        printf("[FAT32] Invalid boot sector signature: 0x%x\n", boot->signature);
+        error("[FAT32] Invalid boot sector signature: 0x%x", boot->signature);
         return -1;
     }
     
     // Check if it's FAT32
     if (boot->fat_size_16 != 0) {
-        printf("[FAT32] Not a FAT32 filesystem (fat_size_16 != 0)\n");
+        error("[FAT32] Not a FAT32 filesystem (fat_size_16 != 0)");
         return -1;
     }
     
     if (boot->fat_size_32 == 0) {
-        printf("[FAT32] Invalid FAT32 (fat_size_32 == 0)\n");
+        error("[FAT32] Invalid FAT32 (fat_size_32 == 0)");
         return -1;
     }
     
     // Check bytes per sector
     if (boot->bytes_per_sector != 512) {
-        printf("[FAT32] Unsupported sector size: %d\n", boot->bytes_per_sector);
+        error("[FAT32] Unsupported sector size: %d", boot->bytes_per_sector);
         return -1;
     }
     
-    printf("[FAT32] Boot sector validation passed\n");
+    success("[FAT32] Boot sector validation passed");
     return 0;
 }
 
 int fat32_mount(uint8_t device_id) {
-    printf("[FAT32] Mounting FAT32 filesystem on device %d\n", device_id);
+    debug("[FAT32] Mounting FAT32 filesystem on device %d", device_id);
     
     if (mounted) {
-        printf("[FAT32] Filesystem already mounted\n");
+        error("[FAT32] Filesystem already mounted");
         return -1;
     }
     
@@ -58,22 +59,18 @@ int fat32_mount(uint8_t device_id) {
     fat32_boot_sector_t boot_sector;
     int result = blockdev_read(device_id, 0, 1, &boot_sector);
     if (result != 0) {
-        printf("[FAT32] Failed to read boot sector: %d\n", result);
+        error("[FAT32] Failed to read boot sector: %d", result);
         return -1;
     }
     
-    printf("[FAT32] Boot sector read successfully\n");
-    printf("[FAT32] OEM Name: ");
-    for (int i = 0; i < 8; i++) {
-        printf("%c", boot_sector.oem_name[i]);
-    }
-    printf("\n");
-    printf("[FAT32] Bytes per sector: %d\n", boot_sector.bytes_per_sector);
-    printf("[FAT32] Sectors per cluster: %d\n", boot_sector.sectors_per_cluster);
-    printf("[FAT32] Reserved sectors: %d\n", boot_sector.reserved_sectors);
-    printf("[FAT32] Number of FATs: %d\n", boot_sector.num_fats);
-    printf("[FAT32] FAT size: %u sectors\n", boot_sector.fat_size_32);
-    printf("[FAT32] Root cluster: %u\n", boot_sector.root_cluster);
+    success("[FAT32] Boot sector read successfully");
+    debug("[FAT32] OEM Name: %.8s", boot_sector.oem_name);
+    debug("[FAT32] Bytes per sector: %d", boot_sector.bytes_per_sector);
+    debug("[FAT32] Sectors per cluster: %d", boot_sector.sectors_per_cluster);
+    debug("[FAT32] Reserved sectors: %d", boot_sector.reserved_sectors);
+    debug("[FAT32] Number of FATs: %d", boot_sector.num_fats);
+    debug("[FAT32] FAT size: %u sectors", boot_sector.fat_size_32);
+    debug("[FAT32] Root cluster: %u", boot_sector.root_cluster);
     
     // Validate boot sector
     if (fat32_validate_boot_sector(&boot_sector) != 0) {
@@ -98,29 +95,29 @@ int fat32_mount(uint8_t device_id) {
     uint32_t data_sectors = total_sectors - fs_info.data_start_sector;
     fs_info.total_clusters = data_sectors / fs_info.sectors_per_cluster;
     
-    printf("[FAT32] FAT starts at sector: %u\n", fs_info.fat_start_sector);
-    printf("[FAT32] Data starts at sector: %u\n", fs_info.data_start_sector);
-    printf("[FAT32] Total clusters: %u\n", fs_info.total_clusters);
+    debug("[FAT32] FAT starts at sector: %u", fs_info.fat_start_sector);
+    debug("[FAT32] Data starts at sector: %u", fs_info.data_start_sector);
+    debug("[FAT32] Total clusters: %u", fs_info.total_clusters);
     
     // Allocate memory for FAT table (simplified - load entire FAT)
     uint32_t fat_bytes = fs_info.fat_size * fs_info.bytes_per_sector;
     fs_info.fat_table = (uint32_t*)kmalloc(fat_bytes);
     if (!fs_info.fat_table) {
-        printf("[FAT32] Failed to allocate memory for FAT table\n");
+        error("[FAT32] Failed to allocate memory for FAT table");
         return -1;
     }
     
     // Read FAT table
-    printf("[FAT32] Reading FAT table (%u sectors)...\n", fs_info.fat_size);
+    debug("[FAT32] Reading FAT table (%u sectors)...", fs_info.fat_size);
     result = blockdev_read(device_id, fs_info.fat_start_sector, 
                           fs_info.fat_size, fs_info.fat_table);
     if (result != 0) {
-        printf("[FAT32] Failed to read FAT table: %d\n", result);
+        error("[FAT32] Failed to read FAT table: %d", result);
         kfree(fs_info.fat_table);
         return -1;
     }
     
-    printf("[FAT32] FAT32 filesystem mounted successfully\n");
+    success("[FAT32] FAT32 filesystem mounted successfully");
     mounted = 1;
     return 0;
 }
@@ -136,7 +133,7 @@ int fat32_unmount(void) {
     }
     
     mounted = 0;
-    printf("[FAT32] Filesystem unmounted\n");
+    debug("[FAT32] Filesystem unmounted");
     return 0;
 }
 
@@ -215,13 +212,13 @@ int fat32_list_directory(uint32_t dir_cluster, fat32_file_info_t* files, int max
         return -1;
     }
     
-    printf("[FAT32] Listing directory cluster %u\n", dir_cluster);
+    debug("[FAT32] Listing directory cluster %u", dir_cluster);
     
     // Allocate buffer for one cluster
     uint32_t cluster_size = fs_info.sectors_per_cluster * fs_info.bytes_per_sector;
     uint8_t* cluster_buffer = (uint8_t*)kmalloc(cluster_size);
     if (!cluster_buffer) {
-        printf("[FAT32] Failed to allocate cluster buffer\n");
+        error("[FAT32] Failed to allocate cluster buffer");
         return -1;
     }
     
@@ -232,7 +229,7 @@ int fat32_list_directory(uint32_t dir_cluster, fat32_file_info_t* files, int max
     while (current_cluster < FAT32_END_CLUSTER && file_count < max_files) {
         // Read the cluster
         if (fat32_read_cluster(current_cluster, cluster_buffer) != 0) {
-            printf("[FAT32] Failed to read cluster %u\n", current_cluster);
+            error("[FAT32] Failed to read cluster %u", current_cluster);
             break;
         }
         
@@ -255,11 +252,10 @@ int fat32_list_directory(uint32_t dir_cluster, fat32_file_info_t* files, int max
                 file_count++;
                 
                 // Print entry info
-                printf("  %s", info.filename);
-                if (info.attributes & FAT32_ATTR_DIRECTORY) {
-                    printf("/");
-                }
-                printf(" (%u bytes, cluster %u)\n", info.size, info.cluster);
+                debug("  %s%s (%u bytes, cluster %u)", 
+                      info.filename,
+                      (info.attributes & FAT32_ATTR_DIRECTORY) ? "/" : "",
+                      info.size, info.cluster);
             }
         }
         
@@ -269,7 +265,7 @@ int fat32_list_directory(uint32_t dir_cluster, fat32_file_info_t* files, int max
     
 done:
     kfree(cluster_buffer);
-    printf("[FAT32] Found %d entries\n", file_count);
+    debug("[FAT32] Found %d entries", file_count);
     return file_count;
 }
 
@@ -292,14 +288,14 @@ uint32_t fat32_find_file(uint32_t dir_cluster, const char* filename) {
 
 int fat32_open(const char* path) {
     if (!mounted) {
-        printf("[FAT32] No filesystem mounted\n");
+        error("[FAT32] No filesystem mounted");
         return -1;
     }
     
     // Use new path resolution to support subdirectories
     uint32_t file_cluster = fat32_find_file_by_path(path);
     if (file_cluster == 0) {
-        printf("[FAT32] File not found: %s\n", path);
+        error("[FAT32] File not found: %s", path);
         return -1;
     }
     
@@ -322,13 +318,13 @@ int fat32_open(const char* path) {
                 }
             }
             
-            printf("[FAT32] Opened file %s (fd=%d, cluster=%u, size=%u)\n", 
-                   path, fd, file_cluster, open_files[fd].file_size);
+            success("[FAT32] Opened file %s (fd=%d, cluster=%u, size=%u)", 
+                    path, fd, file_cluster, open_files[fd].file_size);
             return fd;
         }
     }
     
-    printf("[FAT32] No free file descriptors\n");
+    error("[FAT32] No free file descriptors");
     return -1;
 }
 
@@ -342,8 +338,8 @@ int fat32_read(int fd, void* buffer, size_t size) {
     size_t bytes_read = 0;
     uint32_t cluster_size = fs_info.sectors_per_cluster * fs_info.bytes_per_sector;
     
-    printf("[FAT32] Reading %u bytes from fd %d (pos=%u, size=%u)\n", 
-           size, fd, file->position, file->file_size);
+    debug("[FAT32] Reading %u bytes from fd %d (pos=%u, size=%u)", 
+          size, fd, file->position, file->file_size);
     
     // Don't read past end of file
     if (file->position >= file->file_size) {
@@ -356,14 +352,14 @@ int fat32_read(int fd, void* buffer, size_t size) {
     // Allocate cluster buffer
     uint8_t* cluster_buffer = (uint8_t*)kmalloc(cluster_size);
     if (!cluster_buffer) {
-        printf("[FAT32] Failed to allocate cluster buffer\n");
+        error("[FAT32] Failed to allocate cluster buffer");
         return -1;
     }
     
     while (bytes_read < size && file->current_cluster < FAT32_END_CLUSTER) {
         // Read current cluster
         if (fat32_read_cluster(file->current_cluster, cluster_buffer) != 0) {
-            printf("[FAT32] Failed to read cluster %u\n", file->current_cluster);
+            error("[FAT32] Failed to read cluster %u", file->current_cluster);
             kfree(cluster_buffer);
             return -1;
         }
@@ -388,7 +384,7 @@ int fat32_read(int fd, void* buffer, size_t size) {
     }
     
     kfree(cluster_buffer);
-    printf("[FAT32] Read %u bytes\n", bytes_read);
+    debug("[FAT32] Read %u bytes", bytes_read);
     return bytes_read;
 }
 
@@ -427,26 +423,26 @@ int fat32_seek(int fd, uint32_t position) {
 void fat32_close(int fd) {
     if (fd >= 0 && fd < FAT32_MAX_OPEN_FILES && open_files[fd].in_use) {
         open_files[fd].in_use = 0;
-        printf("[FAT32] Closed file descriptor %d\n", fd);
+        debug("[FAT32] Closed file descriptor %d", fd);
     }
 }
 
 int fat32_get_fs_info(void) {
     if (!mounted) {
-        printf("[FAT32] No filesystem mounted\n");
+        error("[FAT32] No filesystem mounted");
         return -1;
     }
     
-    printf("[FAT32] Filesystem Information:\n");
-    printf("  Device: %d\n", fs_info.device_id);
-    printf("  Bytes per sector: %u\n", fs_info.bytes_per_sector);
-    printf("  Sectors per cluster: %u\n", fs_info.sectors_per_cluster);
-    printf("  Reserved sectors: %u\n", fs_info.reserved_sectors);
-    printf("  Number of FATs: %u\n", fs_info.num_fats);
-    printf("  FAT size: %u sectors\n", fs_info.fat_size);
-    printf("  Root cluster: %u\n", fs_info.root_cluster);
-    printf("  Data start sector: %u\n", fs_info.data_start_sector);
-    printf("  Total clusters: %u\n", fs_info.total_clusters);
+    debug("[FAT32] Filesystem Information:");
+    debug("  Device: %d", fs_info.device_id);
+    debug("  Bytes per sector: %u", fs_info.bytes_per_sector);
+    debug("  Sectors per cluster: %u", fs_info.sectors_per_cluster);
+    debug("  Reserved sectors: %u", fs_info.reserved_sectors);
+    debug("  Number of FATs: %u", fs_info.num_fats);
+    debug("  FAT size: %u sectors", fs_info.fat_size);
+    debug("  Root cluster: %u", fs_info.root_cluster);
+    debug("  Data start sector: %u", fs_info.data_start_sector);
+    debug("  Total clusters: %u", fs_info.total_clusters);
     
     return 0;
 }
@@ -464,7 +460,7 @@ uint32_t fat32_resolve_path(const char* path, char* filename) {
         return 0;
     }
     
-    printf("[FAT32] Resolving path: %s\n", path);
+    debug("[FAT32] Resolving path: %s", path);
     
     // Start from root directory
     uint32_t current_cluster = fs_info.root_cluster;
@@ -494,26 +490,26 @@ uint32_t fat32_resolve_path(const char* path, char* filename) {
                 strncpy(filename, start, FAT32_MAX_FILENAME);
                 filename[FAT32_MAX_FILENAME] = '\0';
             }
-            printf("[FAT32] Final component: %s (directory cluster: %u)\n", start, current_cluster);
+            debug("[FAT32] Final component: %s (directory cluster: %u)", start, current_cluster);
             return current_cluster;
         }
         
         // Extract directory component
         size_t len = end - start;
         if (len > FAT32_MAX_FILENAME) {
-            printf("[FAT32] Directory name too long: %.*s\n", (int)len, start);
+            error("[FAT32] Directory name too long: %.*s", (int)len, start);
             return 0;
         }
         
         strncpy(component, start, len);
         component[len] = '\0';
         
-        printf("[FAT32] Looking for directory: %s in cluster %u\n", component, current_cluster);
+        debug("[FAT32] Looking for directory: %s in cluster %u", component, current_cluster);
         
         // Find the directory in current cluster
         uint32_t dir_cluster = fat32_find_file(current_cluster, component);
         if (dir_cluster == 0) {
-            printf("[FAT32] Directory not found: %s\n", component);
+            error("[FAT32] Directory not found: %s", component);
             return 0;
         }
         
@@ -532,7 +528,7 @@ uint32_t fat32_resolve_path(const char* path, char* filename) {
         }
         
         if (!is_directory) {
-            printf("[FAT32] Path component is not a directory: %s\n", component);
+            error("[FAT32] Path component is not a directory: %s", component);
             return 0;
         }
         
@@ -558,6 +554,6 @@ uint32_t fat32_find_file_by_path(const char* path) {
         return 0;
     }
     
-    printf("[FAT32] Looking for file '%s' in directory cluster %u\n", filename, dir_cluster);
+    debug("[FAT32] Looking for file '%s' in directory cluster %u", filename, dir_cluster);
     return fat32_find_file(dir_cluster, filename);
 }

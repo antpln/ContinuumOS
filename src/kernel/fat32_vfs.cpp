@@ -1,6 +1,7 @@
 #include "kernel/vfs.h"
 #include "kernel/fat32.h"
 #include "kernel/heap.h"
+#include "kernel/debug.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -9,7 +10,7 @@
 static int fat32_vfs_open(vfs_mount_t* mount, const char* path, vfs_file_t* file) {
     (void)mount; // Mount info available if needed
     
-    printf("[FAT32-VFS] Opening file: %s\n", path);
+    debug("[FAT32-VFS] Opening file: %s", path);
     
     // FAT32 currently only supports root directory files
     // Remove leading slash for FAT32 compatibility
@@ -20,13 +21,13 @@ static int fat32_vfs_open(vfs_mount_t* mount, const char* path, vfs_file_t* file
     
     // Skip empty filename (root directory)
     if (filename[0] == '\0') {
-        printf("[FAT32-VFS] Cannot open root directory as file\n");
+        error("[FAT32-VFS] Cannot open root directory as file");
         return VFS_ERROR;
     }
     
     int fat32_fd = fat32_open(filename);
     if (fat32_fd < 0) {
-        printf("[FAT32-VFS] Failed to open file: %s\n", filename);
+        error("[FAT32-VFS] Failed to open file: %s", filename);
         return VFS_NOT_FOUND;
     }
     
@@ -35,7 +36,7 @@ static int fat32_vfs_open(vfs_mount_t* mount, const char* path, vfs_file_t* file
     file->position = 0;
     file->in_use = 1;
     
-    printf("[FAT32-VFS] Successfully opened file: %s (fd=%d)\n", filename, fat32_fd);
+    success("[FAT32-VFS] Successfully opened file: %s (fd=%d)", filename, fat32_fd);
     return VFS_SUCCESS;
 }
 
@@ -49,9 +50,9 @@ static int fat32_vfs_read(vfs_file_t* file, void* buffer, size_t size) {
     
     if (bytes_read >= 0) {
         file->position += bytes_read;
-        printf("[FAT32-VFS] Read %d bytes from FAT32 file\n", bytes_read);
+        debug("[FAT32-VFS] Read %d bytes from FAT32 file", bytes_read);
     } else {
-        printf("[FAT32-VFS] Failed to read from FAT32 file\n");
+        error("[FAT32-VFS] Failed to read from FAT32 file");
     }
     
     return bytes_read;
@@ -62,7 +63,7 @@ static int fat32_vfs_write(vfs_file_t* file, const void* buffer, size_t size) {
     (void)buffer;
     (void)size;
     
-    printf("[FAT32-VFS] Write not supported (read-only filesystem)\n");
+    error("[FAT32-VFS] Write not supported (read-only filesystem)");
     return VFS_ERROR;
 }
 
@@ -76,10 +77,10 @@ static int fat32_vfs_seek(vfs_file_t* file, uint32_t position) {
     
     if (result == 0) {
         file->position = position;
-        printf("[FAT32-VFS] Seeked to position %u\n", position);
+        debug("[FAT32-VFS] Seeked to position %u", position);
         return VFS_SUCCESS;
     } else {
-        printf("[FAT32-VFS] Failed to seek to position %u\n", position);
+        error("[FAT32-VFS] Failed to seek to position %u", position);
         return VFS_ERROR;
     }
 }
@@ -89,7 +90,7 @@ static void fat32_vfs_close(vfs_file_t* file) {
         int fat32_fd = (int)file->fs_handle;
         fat32_close(fat32_fd);
         
-        printf("[FAT32-VFS] Closed FAT32 file (fd=%d)\n", fat32_fd);
+        debug("[FAT32-VFS] Closed FAT32 file (fd=%d)", fat32_fd);
         file->in_use = 0;
         file->fs_handle = 0;
         file->position = 0;
@@ -99,12 +100,12 @@ static void fat32_vfs_close(vfs_file_t* file) {
 static int fat32_vfs_readdir(vfs_mount_t* mount, const char* path, vfs_dirent_t* entries, int max_entries) {
     (void)mount; // Mount info available if needed
     
-    printf("[FAT32-VFS] Reading directory: %s\n", path);
+    debug("[FAT32-VFS] Reading directory: %s", path);
     
     // Allocate temporary buffer for FAT32 file info
     fat32_file_info_t* fat32_entries = (fat32_file_info_t*)kmalloc(max_entries * sizeof(fat32_file_info_t));
     if (!fat32_entries) {
-        printf("[FAT32-VFS] Failed to allocate memory for directory listing\n");
+        error("[FAT32-VFS] Failed to allocate memory for directory listing");
         return VFS_ERROR;
     }
     
@@ -112,14 +113,14 @@ static int fat32_vfs_readdir(vfs_mount_t* mount, const char* path, vfs_dirent_t*
     char filename[FAT32_MAX_FILENAME + 1];
     uint32_t dir_cluster = fat32_resolve_path(path, filename);
     if (dir_cluster == 0) {
-        printf("[FAT32-VFS] Directory not found: %s\n", path);
+        error("[FAT32-VFS] Directory not found: %s", path);
         kfree(fat32_entries);
         return VFS_ERROR;
     }
     
     // If there's a filename, this is not a directory path
     if (strlen(filename) > 0) {
-        printf("[FAT32-VFS] Path is not a directory: %s\n", path);
+        error("[FAT32-VFS] Path is not a directory: %s", path);
         kfree(fat32_entries);
         return VFS_ERROR;
     }
@@ -127,7 +128,7 @@ static int fat32_vfs_readdir(vfs_mount_t* mount, const char* path, vfs_dirent_t*
     int count = fat32_list_directory(dir_cluster, fat32_entries, max_entries);
     
     if (count < 0) {
-        printf("[FAT32-VFS] Failed to list FAT32 directory\n");
+        error("[FAT32-VFS] Failed to list FAT32 directory");
         kfree(fat32_entries);
         return VFS_ERROR;
     }
@@ -142,7 +143,7 @@ static int fat32_vfs_readdir(vfs_mount_t* mount, const char* path, vfs_dirent_t*
     }
     
     kfree(fat32_entries);
-    printf("[FAT32-VFS] Found %d entries in FAT32 directory\n", count);
+    success("[FAT32-VFS] Found %d entries in FAT32 directory", count);
     return count;
 }
 
@@ -150,7 +151,7 @@ static int fat32_vfs_mkdir(vfs_mount_t* mount, const char* path) {
     (void)mount;
     (void)path;
     
-    printf("[FAT32-VFS] mkdir not supported (read-only filesystem)\n");
+    error("[FAT32-VFS] mkdir not supported (read-only filesystem)");
     return VFS_ERROR;
 }
 
@@ -158,7 +159,7 @@ static int fat32_vfs_rmdir(vfs_mount_t* mount, const char* path) {
     (void)mount;
     (void)path;
     
-    printf("[FAT32-VFS] rmdir not supported (read-only filesystem)\n");
+    error("[FAT32-VFS] rmdir not supported (read-only filesystem)");
     return VFS_ERROR;
 }
 
@@ -166,7 +167,7 @@ static int fat32_vfs_create(vfs_mount_t* mount, const char* path) {
     (void)mount;
     (void)path;
     
-    printf("[FAT32-VFS] create not supported (read-only filesystem)\n");
+    error("[FAT32-VFS] create not supported (read-only filesystem)");
     return VFS_ERROR;
 }
 
@@ -174,7 +175,7 @@ static int fat32_vfs_remove(vfs_mount_t* mount, const char* path) {
     (void)mount;
     (void)path;
     
-    printf("[FAT32-VFS] remove not supported (read-only filesystem)\n");
+    error("[FAT32-VFS] remove not supported (read-only filesystem)");
     return VFS_ERROR;
 }
 
@@ -251,11 +252,11 @@ vfs_operations_t* fat32_get_vfs_ops(void) {
 
 // Function to mount FAT32 via VFS
 int fat32_vfs_mount(const char* mountpoint, uint8_t device_id) {
-    printf("[FAT32-VFS] Mounting FAT32 on device %d at %s\n", device_id, mountpoint);
+    debug("[FAT32-VFS] Mounting FAT32 on device %d at %s", device_id, mountpoint);
     
     // First mount FAT32 using existing function
     if (fat32_mount(device_id) != 0) {
-        printf("[FAT32-VFS] Failed to mount FAT32 on device %d\n", device_id);
+        error("[FAT32-VFS] Failed to mount FAT32 on device %d", device_id);
         return VFS_ERROR;
     }
     
