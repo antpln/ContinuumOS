@@ -10,9 +10,6 @@ kernel/kernel2.bin
 kernel.iso
 isodir/
 
-# Disk images
-test_fat32.img
-
 # macOS
 .DS_Store
 
