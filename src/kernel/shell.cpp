@@ -11,6 +11,7 @@
 #include "editor_process.h"
 #include <kernel/process.h>
 #include "kernel/memory.h"
+#include <kernel/scheduler.h>
 
 extern Terminal terminal;
 extern shell_command_t commands[];
@@ -100,6 +101,10 @@ void shell_history_reset(void) {
     shell.history_nav = -1;
 }
 
+void shell_set_input_enabled(bool enabled) {
+    shell.input_enabled = enabled;
+}
+
 // Parse and dispatch a command line
 void shell_process_command(const char* cmd) {
     char buf[SHELL_BUFFER_SIZE];
@@ -170,7 +175,10 @@ void shell_handle_key(keyboard_event ke) {
         shell_process_command(shell.buffer);
         shell.index = 0;
         shell_history_reset();
-        shell_print_prompt();
+        // Only print a new prompt if input is still enabled
+        if (shell.input_enabled) {
+            shell_print_prompt();
+        }
         return;
     }
 
@@ -362,13 +370,19 @@ void cmd_edit(const char* args) {
         return;
     }
     if (!shell.cwd) shell.cwd = fs_get_root();
-    editor_filename_global = args;
-    editor_dir_global = shell.cwd;
-    start_process("editor", editor_entry, 0, 8192);
+    // Set parameters safely (copy) before starting the process
+    editor_set_params(args, shell.cwd);
+    Process* p = k_start_process("editor", editor_entry, 0, 8192);
+    if (p) {
+        // Give keyboard focus to the editor immediately and disable shell input
+        scheduler_set_foreground(p);
+        shell.input_enabled = false;
+    }
 }
 
 // Print memory usage information
 void cmd_meminfo(const char* args) {
+    (void)args;
     uint32_t total = PhysicalMemoryManager::get_memory_size();
     uint32_t free = PhysicalMemoryManager::get_free_frames() * PAGE_SIZE;
     printf("Total memory: %u bytes\n", total);

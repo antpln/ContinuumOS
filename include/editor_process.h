@@ -4,8 +4,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-extern const char* editor_filename_global;
-extern FSNode* editor_dir_global;
+// Set editor parameters before starting the process
+void editor_set_params(const char* filename, FSNode* dir);
+// Editor process entry point
 void editor_entry();
 #ifdef __cplusplus
 }

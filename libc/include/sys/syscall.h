@@ -16,11 +16,20 @@ static inline void syscall_yield() {
 }
 
 static inline void syscall_yield_for_event(int hook_type, uint64_t trigger_value) {
-    asm volatile (
+#if defined(__x86_64__)
+    register uint64_t rcx asm("rcx") = trigger_value;
+    __asm__ volatile (
         "int $0x80"
         :
-        : "a"(SYSCALL_YIELD_FOR_EVENT), "b"(hook_type), "c"(trigger_value)
+        : "a"(SYSCALL_YIELD_FOR_EVENT), "b"(hook_type), "c"(rcx)
     );
+#else
+    __asm__ volatile (
+        "int $0x80"
+        :
+        : "a"(SYSCALL_YIELD_FOR_EVENT), "b"(hook_type), "c"((uint32_t)trigger_value)
+    );
+#endif
 }
 
 static inline int syscall_start_process(const char* name, void (*entry)(), int speculative, uint32_t stack_size) {

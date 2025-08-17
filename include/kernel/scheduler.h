@@ -5,6 +5,10 @@
 
 #define MAX_PROCESSES 32
 
+// Forward decl for ISR regs
+struct registers;
+typedef struct registers registers_t;
+
 // Scheduler process table
 extern Process* process_table[MAX_PROCESSES];
 extern int process_count;
@@ -30,11 +34,17 @@ void process_yield_for_event(Process* proc, HookType event_type, uint64_t event_
 void scheduler_resume_processes_for_event(HookType event_type, uint64_t event_value);
 // Called on each tick for quantum-based scheduling
 void scheduler_on_tick(registers_t* regs);
-// Force a context switch using saved registers
+// Force a context switch using last saved registers (from an interrupt)
 void scheduler_force_switch();
+// Force a context switch using the provided register frame (e.g., from a syscall)
+void scheduler_force_switch_with_regs(registers_t* regs);
 // Context switch to another process
 void context_switch(registers_t* regs);
 // Start executing the first scheduled process
 void scheduler_start();
+
+// Foreground (keyboard focus) process helpers
+void scheduler_set_foreground(Process* proc);
+Process* scheduler_get_foreground();
 
 #endif // SCHEDULER_H

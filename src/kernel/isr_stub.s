@@ -460,4 +460,32 @@ irq_stub_table:
     .long irq14
     .long irq15
 
+# Trampoline used by scheduler to finalize a context switch
+.global switch_to_trampoline
+.extern g_next_context
+switch_to_trampoline:
+    cli
+    # EDX = pointer to CPUContext
+    mov g_next_context, %edx
+    # Load and set EFLAGS first
+    mov 36(%edx), %eax
+    push %eax
+    popf
+    # Switch stacks
+    mov 4(%edx), %esp
+    mov 8(%edx), %ebp
+    # Restore general-purpose registers (order chosen to avoid clobbering pointer)
+    mov 12(%edx), %eax      # EAX
+    mov 16(%edx), %ebx      # EBX
+    mov 20(%edx), %ecx      # ECX
+    # Push next EIP onto new stack and finally restore remaining regs
+    push 0(%edx)            # EIP
+    mov 24(%edx), %edx      # EDX
+    mov g_next_context, %esi
+    mov 28(%esi), %esi      # ESI
+    mov g_next_context, %edi
+    mov 32(%edi), %edi      # EDI
+    sti
+    ret
+
 

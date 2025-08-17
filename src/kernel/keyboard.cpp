@@ -81,7 +81,7 @@ keyboard_event read_keyboard() {
     }
 
     event.shift = shift_pressed;
-    event.release = scancode & KBD_SCANCODE_RELEASE;
+    event.release = (scancode & KBD_SCANCODE_RELEASE) != 0;
     if (scancode == KBD_SCANCODE_CAPS_LOCK) {
         caps_lock_active = !caps_lock_active;
     }
@@ -99,17 +99,27 @@ void keyboard_callback(registers_t *regs) {
     if (c) {
         keyboard_buffer_push(c);
     }
-    Process* proc = scheduler_current_process();
-    if (proc) {
+
+    Process* fg = scheduler_get_foreground();
+    if (fg) {
+        // Route exclusively to foreground process
         IOEvent io_event;
         io_event.type = EVENT_KEYBOARD;
         io_event.data.keyboard = event;
-        push_io_event(proc, io_event);
+        push_io_event(fg, io_event);
+        if (fg->keyboard_handler)
+            fg->keyboard_handler(event);
+        return;
+    }
 
-        if (proc->keyboard_handler)
-            proc->keyboard_handler(event);
-        else
-            shell_handle_key(event);
+    // No foreground app: send to current process if it handles keys, else to shell
+    Process* current = scheduler_current_process();
+    if (current && current->keyboard_handler) {
+        IOEvent io_event;
+        io_event.type = EVENT_KEYBOARD;
+        io_event.data.keyboard = event;
+        push_io_event(current, io_event);
+        current->keyboard_handler(event);
     } else {
         shell_handle_key(event);
     }

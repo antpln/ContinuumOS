@@ -13,6 +13,14 @@ static int quantum_counter = 0;
 
 static registers_t* last_regs = NULL;
 
+// Trampoline to complete a context switch after returning from an interrupt/syscall
+extern "C" void switch_to_trampoline();
+// Next context to switch to (used by the trampoline)
+extern "C" CPUContext* g_next_context;
+extern "C" CPUContext* g_next_context = nullptr;
+
+static Process* foreground_proc = nullptr;
+
 void scheduler_init() {
     process_count = 0;
     current_process_idx = -1;
@@ -148,7 +156,7 @@ void scheduler_resume_processes_for_event(HookType event_type, uint64_t event_va
 void context_switch(registers_t* regs) {
     Process* current = scheduler_current_process();
     if (!current) return;
-    // Save current process state
+    // Save current process state from interrupt/syscall frame
     current->current_state.context.eip = regs->eip;
     current->current_state.context.esp = regs->esp;
     current->current_state.context.ebp = regs->ebp;
@@ -164,17 +172,9 @@ void context_switch(registers_t* regs) {
     Process* next = scheduler_next_process();
     if (!next || next == current) return;
 
-    // Restore next process state
-    regs->eip = next->current_state.context.eip;
-    regs->esp = next->current_state.context.esp;
-    regs->ebp = next->current_state.context.ebp;
-    regs->eax = next->current_state.context.eax;
-    regs->ebx = next->current_state.context.ebx;
-    regs->ecx = next->current_state.context.ecx;
-    regs->edx = next->current_state.context.edx;
-    regs->esi = next->current_state.context.esi;
-    regs->edi = next->current_state.context.edi;
-    regs->eflags = next->current_state.context.eflags;
+    // Program a trampoline return into the next process
+    g_next_context = &next->current_state.context;
+    regs->eip = (uint32_t)switch_to_trampoline;
 
     last_regs = regs;
 }
@@ -193,6 +193,11 @@ void scheduler_force_switch() {
         context_switch(last_regs);
 }
 
+void scheduler_force_switch_with_regs(registers_t* regs) {
+    if (regs)
+        context_switch(regs);
+}
+
 void scheduler_start() {
     Process* proc = scheduler_current_process();
     if (!proc) return;
@@ -206,4 +211,12 @@ void scheduler_start() {
           "r"(proc->current_state.context.eip)
         : "memory"
     );
+}
+
+void scheduler_set_foreground(Process* proc) {
+    foreground_proc = proc;
+}
+
+Process* scheduler_get_foreground() {
+    return foreground_proc;
 }

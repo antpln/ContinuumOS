@@ -27,6 +27,7 @@ extern "C"
 
 {
         void shell_entry();
+        void test_proc_entry();
 #endif
 
 	Terminal terminal;
@@ -34,13 +35,14 @@ extern "C"
 	void kernel_main(uint32_t multiboot_info)
 	{
 
-		char *ascii_guitar = R"(
+		const char *ascii_guitar = R"(
           Q
          /|\
        (o\_)=="#
         \| |\
        ~H| |/
             ~)";
+        (void)ascii_guitar;
 		terminal.initialize();
 
 		// Initialize the scheduler (round-robin)
@@ -109,8 +111,12 @@ extern "C"
                 // Initialize the PIT timer to 1000 Hz
                 init_timer(1000);
 
-                Process* shell_proc = start_process("shell", shell_entry, 0, 8192);
+                Process* shell_proc = k_start_process("shell", shell_entry, 0, 8192);
                 (void)shell_proc;
+
+                // Start test process in /bin
+                Process* testp = k_start_process("/bin/test-proc", test_proc_entry, 0, 8192);
+                (void)testp;
 
                 __asm__ volatile("sti");
 

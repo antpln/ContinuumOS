@@ -1,4 +1,3 @@
-
 #ifndef SHELL_H
 #define SHELL_H
 #include <stdio.h>
@@ -25,5 +24,8 @@ void shell_handle_key(keyboard_event ke);
 
 // Initialize the shell (print a welcome message and the prompt).
 void shell_init();
+
+// Enable or disable shell input (used when a foreground app takes focus)
+void shell_set_input_enabled(bool enabled);
 
 #endif // SHELL_H

@@ -83,9 +83,12 @@ int process_has_matching_hook(Process* proc, HookType type, uint64_t value) {
     return 0;
 }
 
-Process* start_process(const char* name, void (*entry)(), int speculative, uint32_t stack_size) {
+Process* k_start_process(const char* name, void (*entry)(), int speculative, uint32_t stack_size) {
     Process* proc = (Process*)kmalloc(sizeof(Process));
     if (!proc) return NULL;
+    // Zero the struct to avoid stale data
+    for (size_t i = 0; i < sizeof(Process); ++i) ((uint8_t*)proc)[i] = 0;
+
     proc->pid = create_process(name, entry, speculative);
     proc->name = name;
     proc->speculative = speculative;
@@ -93,12 +96,24 @@ Process* start_process(const char* name, void (*entry)(), int speculative, uint3
     proc->alive = 1;
     proc->hook_count = 0;
     proc->tickets = 1;
+    proc->io_events.head = 0;
+    proc->io_events.tail = 0;
+    proc->keyboard_handler = NULL;
+
+    // Allocate and set up stack
+    uint32_t stack_top = (uint32_t)kmalloc(stack_size);
+    if (!stack_top) return NULL;
+    stack_top += stack_size;
+
     proc->current_state.context.eip = (uint32_t)entry;
-    proc->current_state.context.esp = (uint32_t)kmalloc(stack_size) + stack_size;
-    proc->current_state.context.ebp = proc->current_state.context.esp;
-    proc->current_state.stack_base = (uint8_t*)(proc->current_state.context.esp - stack_size);
+    proc->current_state.context.esp = stack_top;
+    proc->current_state.context.ebp = stack_top;
+    proc->current_state.context.eflags = 0x202; // IF=1, reserved bit set
+
+    proc->current_state.stack_base = (uint8_t*)(stack_top - stack_size);
     proc->current_state.stack_size = stack_size;
-    // Initialize other fields as needed
+
+    // Insert into scheduler
     scheduler_add_process(proc);
     return proc;
 }

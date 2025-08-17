@@ -1,4 +1,3 @@
-
 #include <kernel/editor.h>
 #include <stdio.h>
 #include <string.h>
@@ -7,6 +6,7 @@
 #include <kernel/scheduler.h>
 #include <kernel/process.h>
 #include <utils.h>
+#include <kernel/shell.h>
 
 extern Terminal terminal;
 
@@ -23,6 +23,20 @@ extern Terminal terminal;
 #define KEY_DOWN_ARROW          0x50
 
 static Editor editor_instance;
+
+// Static copies of parameters set before process start
+static char s_filename[64];
+static FSNode* s_dir = nullptr;
+
+extern "C" void editor_set_params(const char* filename, FSNode* dir) {
+    if (filename) {
+        strncpy(s_filename, filename, sizeof(s_filename) - 1);
+        s_filename[sizeof(s_filename) - 1] = '\0';
+    } else {
+        s_filename[0] = '\0';
+    }
+    s_dir = dir;
+}
 
 // Copy a line with null-termination
 static inline void copy_line(char* dst, const char* src) {
@@ -124,16 +138,13 @@ void Editor::exit(bool save) {
     active = false;
     // Clear the status-bar row
     int y = terminal.get_vga_height() - 1;
-    for (int x = 0; x < EDITOR_LINE_LENGTH; ++x) {
+    size_t width = terminal.get_vga_width();
+    for (size_t x = 0; x < width; ++x) {
         terminal.put_at(' ',
                         terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK),
                         x, y);
     }
-    printf("nutshell> ");
-
-    Process* proc = scheduler_current_process();
-    if (proc)
-        kill_process(proc);
+    // Do not kill the process or print the shell prompt here; leave that to editor_entry
 }
 
 // Draw a single line in the editor
@@ -141,23 +152,29 @@ void Editor::draw_line(const char* text, int y, bool is_active_line) {
     const char* prefix = is_active_line ? PREFIX_ACTIVE : PREFIX_INACTIVE;
     int prefix_len = is_active_line ? PREFIX_ACTIVE_LEN : PREFIX_INACTIVE_LEN;
 
-    for (int i = 0; i < prefix_len; ++i) {
+    size_t width = terminal.get_vga_width();
+    int max_content = (int)width - prefix_len;
+    if (max_content < 0) max_content = 0;
+
+    for (int i = 0; i < prefix_len && i < (int)width; ++i) {
         terminal.put_at(prefix[i],
                         terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK),
                         i, y);
     }
 
     int len = strlen(text);
+    if (len > max_content) len = max_content;
     for (int i = 0; i < len; ++i) {
         char c = text[i] ? text[i] : ' ';
         int x = prefix_len + i;
         auto color = (is_active_line && i == cursor_col)
                    ? terminal.make_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE)
                    : terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-        terminal.put_at(c, color, x, y);
+        if (x < (int)width)
+            terminal.put_at(c, color, x, y);
     }
 
-    for (int x = prefix_len + len; x < EDITOR_LINE_LENGTH; ++x) {
+    for (int x = prefix_len + len; x < (int)width; ++x) {
         terminal.put_at(' ',
                         terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK),
                         x, y);
@@ -167,43 +184,45 @@ void Editor::draw_line(const char* text, int y, bool is_active_line) {
 // Draw the status bar at the bottom
 void Editor::draw_status_bar() {
     int y = terminal.get_vga_height() - 1;
+    size_t width = terminal.get_vga_width();
     char line[EDITOR_LINE_LENGTH];
     int pos = 0;
 
     // "editing: filename"
     const char* lbl = "editing: ";
-    for (int i = 0; lbl[i] && pos < EDITOR_LINE_LENGTH - 1; ++i)
+    for (int i = 0; lbl[i] && pos < (int)sizeof(line) - 1; ++i)
         line[pos++] = lbl[i];
-    for (int i = 0; filename[i] && pos < EDITOR_LINE_LENGTH - 1; ++i)
+    for (int i = 0; filename[i] && pos < (int)sizeof(line) - 1; ++i)
         line[pos++] = filename[i];
 
     // "  |  Ln X/Y"
     const char* mid1 = "  |  Ln ";
-    for (int i = 0; mid1[i] && pos < EDITOR_LINE_LENGTH - 1; ++i)
+    for (int i = 0; mid1[i] && pos < (int)sizeof(line) - 1; ++i)
         line[pos++] = mid1[i];
-    pos += uitoa(cursor_line + 1, &line[pos], EDITOR_LINE_LENGTH - pos);
-    if (pos < EDITOR_LINE_LENGTH - 1)
+    pos += uitoa(cursor_line + 1, &line[pos], (int)sizeof(line) - pos);
+    if (pos < (int)sizeof(line) - 1)
         line[pos++] = '/';
-    pos += uitoa(line_count, &line[pos], EDITOR_LINE_LENGTH - pos);
+    pos += uitoa(line_count, &line[pos], (int)sizeof(line) - pos);
 
     // "  Col Z"
     const char* mid2 = "  Col ";
-    for (int i = 0; mid2[i] && pos < EDITOR_LINE_LENGTH - 1; ++i)
+    for (int i = 0; mid2[i] && pos < (int)sizeof(line) - 1; ++i)
         line[pos++] = mid2[i];
-    pos += uitoa(cursor_col + 1, &line[pos], EDITOR_LINE_LENGTH - pos);
+    pos += uitoa(cursor_col + 1, &line[pos], (int)sizeof(line) - pos);
 
     // "  |  MESSAGE"
     const char* mid3 = "  |  ";
-    for (int i = 0; mid3[i] && pos < EDITOR_LINE_LENGTH - 1; ++i)
+    for (int i = 0; mid3[i] && pos < (int)sizeof(line) - 1; ++i)
         line[pos++] = mid3[i];
     const char* msg = status_message[0] ? status_message : "EDITING";
-    for (int i = 0; msg[i] && pos < EDITOR_LINE_LENGTH - 1; ++i)
+    for (int i = 0; msg[i] && pos < (int)sizeof(line) - 1; ++i)
         line[pos++] = msg[i];
 
     line[pos] = '\0';
 
     int len = strlen(line);
-    for (int x = 0; x < EDITOR_LINE_LENGTH; ++x) {
+    if (len > (int)width) len = (int)width;
+    for (int x = 0; x < (int)width; ++x) {
         char c = (x < len) ? line[x] : ' ';
         terminal.put_at(c,
                         terminal.make_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE),
@@ -226,12 +245,15 @@ void Editor::render() {
         viewport_offset = cursor_line - rows + 1;
     }
 
-    for (int y = 0; y < rows; ++y) {
+    size_t width = terminal.get_vga_width();
+    int visible_rows = rows;
+
+    for (int y = 0; y < visible_rows; ++y) {
         int idx = viewport_offset + y;
         if (idx < line_count) {
             draw_line(buffer[idx], y, idx == cursor_line);
         } else {
-            for (int x = 0; x < EDITOR_LINE_LENGTH; ++x) {
+            for (size_t x = 0; x < width; ++x) {
                 terminal.put_at(' ',
                                 terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK),
                                 x, y);
@@ -242,7 +264,9 @@ void Editor::render() {
     draw_status_bar();
 
     int cy = cursor_line - viewport_offset;
-    terminal.set_cursor(cy, cursor_col + PREFIX_ACTIVE_LEN);
+    size_t cursor_x = (size_t)(cursor_col + PREFIX_ACTIVE_LEN);
+    if (cursor_x >= width) cursor_x = width ? (width - 1) : 0;
+    terminal.set_cursor(cy, cursor_x);
 }
 
 // Insert a character at the cursor position
@@ -383,19 +407,32 @@ void editor_handle_key(keyboard_event ke) {
     editor_instance.handle_key(ke);
 }
 
-// Globals used to pass parameters from the shell
-const char* editor_filename_global = nullptr;
-FSNode* editor_dir_global = nullptr;
-
 extern "C" void editor_entry() {
+    printf("[editor] entry\n");
     Process* proc = scheduler_current_process();
-    if (proc)
+    if (proc) {
         register_keyboard_handler(proc, editor_handle_key);
-    editor_start(editor_filename_global, editor_dir_global);
+        scheduler_set_foreground(proc);
+    }
+    // Ensure shell stops echoing and prompting while editor is active
+    shell_set_input_enabled(false);
+
+    // Use the safe copied params
+    printf("[editor] starting file '%s'\n", s_filename[0] ? s_filename : "untitled");
+    editor_start(s_filename[0] ? s_filename : (const char*)"untitled", s_dir);
     while (editor_is_active()) {
         asm volatile("hlt");
     }
-    if (proc)
+    printf("[editor] exit loop\n");
+    if (proc) {
+        scheduler_set_foreground(nullptr);
+        register_keyboard_handler(proc, nullptr);
+    }
+    // Re-enable shell input and print prompt, then terminate this process
+    shell_set_input_enabled(true);
+    printf("nutshell> ");
+    if (proc) {
         kill_process(proc);
+    }
     while (1) asm volatile("hlt");
 }

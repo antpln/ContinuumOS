@@ -18,6 +18,9 @@ typedef struct CPUContext {
     uint32_t eflags;
 } CPUContext;
 
+// Export the next context symbol for the trampoline
+extern struct CPUContext* g_next_context;
+
 typedef struct ProcessState {
     CPUContext context;
     uint32_t* page_directory;
@@ -69,6 +72,10 @@ void kill_process(Process* proc);
 void register_keyboard_handler(Process* proc, KeyboardHandler handler);
 void set_process_tickets(Process* proc, int tickets); // Set tickets for a process
 
+// IO event queue helpers
+void push_io_event(Process* proc, IOEvent event);
+int pop_io_event(Process* proc, IOEvent* out_event);
+
 // Register a hook for a process
 int process_register_hook(Process* proc, HookType type, uint64_t trigger_value);
 // Remove a hook from a process
@@ -76,8 +83,8 @@ int process_remove_hook(Process* proc, HookType type, uint64_t trigger_value);
 // Check if a process has a matching hook
 int process_has_matching_hook(Process* proc, HookType type, uint64_t value);
 
-// Start a process (kernel or userspace)
-Process* start_process(const char* name, void (*entry)(), int speculative, uint32_t stack_size);
+// Start a process (kernel internal helper)
+Process* k_start_process(const char* name, void (*entry)(), int speculative, uint32_t stack_size);
 
 #ifdef __cplusplus
 }

@@ -69,9 +69,21 @@ int sys_get_io_event(IOEvent* out_event) {
     return pop_io_event(proc, out_event);
 }
 
+void sys_yield_with_regs(registers_t* regs) {
+    (void)scheduler_current_process();
+    scheduler_force_switch_with_regs(regs);
+}
+
 void sys_yield() {
     (void)scheduler_current_process();
     scheduler_force_switch();
+}
+
+void sys_yield_for_event_with_regs(registers_t* regs, int hook_type, uint64_t trigger_value) {
+    Process* proc = scheduler_current_process();
+    if (!proc) return;
+    process_yield_for_event(proc, (HookType)hook_type, trigger_value);
+    scheduler_force_switch_with_regs(regs);
 }
 
 void sys_yield_for_event(int hook_type, uint64_t trigger_value) {
@@ -79,6 +91,16 @@ void sys_yield_for_event(int hook_type, uint64_t trigger_value) {
     if (!proc) return;
     process_yield_for_event(proc, (HookType)hook_type, trigger_value);
     scheduler_force_switch();
+}
+
+static inline void sys_exit_with_regs(registers_t* regs) {
+    Process* proc = scheduler_current_process();
+    if (proc) {
+        // Stop handling input
+        register_keyboard_handler(proc, nullptr);
+        kill_process(proc);
+    }
+    scheduler_force_switch_with_regs(regs);
 }
 
 extern "C" void syscall_dispatch(registers_t* regs) {
@@ -89,14 +111,19 @@ extern "C" void syscall_dispatch(registers_t* regs) {
     uint32_t arg4 = regs->esi;
     switch (syscall_num) {
         case 0x80: // SYSCALL_YIELD
-            sys_yield();
+            sys_yield_with_regs(regs);
             break;
         case 0x81: // SYSCALL_YIELD_FOR_EVENT
-            sys_yield_for_event((int)arg1, (uint64_t)arg2);
+            sys_yield_for_event_with_regs(regs, (int)arg1, (uint64_t)arg2);
             break;
-        case 0x82: // SYSCALL_START_PROCESS
+        case 0x82: { // SYSCALL_START_PROCESS
             // arg1: name, arg2: entry, arg3: speculative, arg4: stack_size
-            start_process((const char*)arg1, (void (*)())arg2, (int)arg3, (uint32_t)arg4);
+            Process* p = k_start_process((const char*)arg1, (void (*)())arg2, (int)arg3, (uint32_t)arg4);
+            regs->eax = p ? (uint32_t)p->pid : (uint32_t)-1;
+            break;
+        }
+        case 0x83: // SYSCALL_EXIT
+            sys_exit_with_regs(regs);
             break;
         // ...other syscalls...
         default:
