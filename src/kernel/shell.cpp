@@ -33,7 +33,6 @@ typedef struct {
     size_t   index;
     bool     input_enabled;
     bool     prompt_visible;
-    FSNode*  cwd;
     char     history[SHELL_HISTORY_SIZE][SHELL_BUFFER_SIZE];
     size_t   history_count;
     int      history_nav;
@@ -65,7 +64,6 @@ void shell_init(void) {
     shell.index         = 0;
     shell.input_enabled = true;
     shell.prompt_visible = false;
-    shell.cwd           = fs_get_root();
     shell.history_count = 0;
     shell.history_nav   = -1;
     printf("Welcome to nutshell!\n");
@@ -459,8 +457,52 @@ void cmd_history(const char* args) {
 
 // Open file in editor
 void cmd_edit(const char* args) {
-    (void)args;
-    printf("edit: VFS integration not yet implemented\n");
+    if (!args || !*args) {
+        printf("Usage: edit <file>\n");
+        return;
+    }
+
+    char path[VFS_MAX_PATH];
+    if (args[0] != '/') {
+        const char* cwd = vfs_getcwd();
+        size_t cwd_len = strlen(cwd);
+        size_t args_len = strlen(args);
+        size_t extra = (strcmp(cwd, "/") == 0) ? 0 : 1;
+        if (cwd_len + extra + args_len >= sizeof(path)) {
+            printf("edit: path too long\n");
+            return;
+        }
+        strcpy(path, cwd);
+        if (extra) {
+            path[cwd_len] = '/';
+            path[cwd_len + 1] = '\0';
+        }
+        strcat(path, args);
+    } else {
+        if (strlen(args) >= sizeof(path)) {
+            printf("edit: path too long\n");
+            return;
+        }
+        strncpy(path, args, sizeof(path) - 1);
+        path[sizeof(path) - 1] = '\0';
+    }
+
+    vfs_dirent_t info;
+    if (vfs_stat(path, &info) != VFS_SUCCESS) {
+        if (vfs_create(path) != VFS_SUCCESS) {
+            printf("edit: cannot create '%s'\n", path);
+            return;
+        }
+    } else if (info.type != VFS_TYPE_FILE) {
+        printf("edit: '%s' is not a file\n", path);
+        return;
+    }
+
+    editor_set_params(path);
+    Process* p = k_start_process("editor", editor_entry, 0, 8192);
+    if (p) {
+        scheduler_set_foreground(p);
+    }
 }
 
 // List block devices
@@ -558,20 +600,7 @@ void cmd_fat32_cat(const char* args) {
     strcat(path, args);
     
     printf("Reading FAT32 file via VFS: %s\n", path);
-    
-    vfs_file_t file;
-    if (vfs_open(path, &file) != VFS_SUCCESS) {
-        printf("Failed to open file: %s\n", args);
-        return;
-    }
-    if (!shell.cwd) shell.cwd = fs_get_root();
-    // Set parameters safely (copy) before starting the process
-    editor_set_params(args, shell.cwd);
-    Process* p = k_start_process("editor", editor_entry, 0, 8192);
-    if (p) {
-        // Give keyboard focus to the editor immediately and disable shell input
-        scheduler_set_foreground(p);
-    }
+    cmd_cat(path);
 }
 
 // Print memory usage information

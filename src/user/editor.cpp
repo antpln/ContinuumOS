@@ -1,4 +1,5 @@
 #include <kernel/editor.h>
+#include <kernel/vfs.h>
 #include <stdio.h>
 #include <string.h>
 #include <kernel/heap.h>
@@ -25,18 +26,32 @@ extern Terminal terminal;
 
 static Editor editor_instance;
 
-// Static copies of parameters set before process start
-static char s_filename[64];
-static FSNode* s_dir = nullptr;
+// Static copy of path set before process start
+static char s_filepath[VFS_MAX_PATH];
 
-extern "C" void editor_set_params(const char* filename, FSNode* dir) {
-    if (filename) {
-        strncpy(s_filename, filename, sizeof(s_filename) - 1);
-        s_filename[sizeof(s_filename) - 1] = '\0';
+extern "C" void editor_set_params(const char* path) {
+    if (path && *path) {
+        strncpy(s_filepath, path, sizeof(s_filepath) - 1);
+        s_filepath[sizeof(s_filepath) - 1] = '\0';
     } else {
-        s_filename[0] = '\0';
+        const char* cwd = vfs_getcwd();
+        if (strcmp(cwd, "/") == 0) {
+            strncpy(s_filepath, "/edit.txt", sizeof(s_filepath) - 1);
+            s_filepath[sizeof(s_filepath) - 1] = '\0';
+        } else {
+            size_t cwd_len = strlen(cwd);
+            const char* name = "edit.txt";
+            size_t name_len = strlen(name);
+            if (cwd_len + 1 + name_len >= sizeof(s_filepath)) {
+                strncpy(s_filepath, "/edit.txt", sizeof(s_filepath) - 1);
+                s_filepath[sizeof(s_filepath) - 1] = '\0';
+            } else {
+                memcpy(s_filepath, cwd, cwd_len);
+                s_filepath[cwd_len] = '/';
+                memcpy(s_filepath + cwd_len + 1, name, name_len + 1);
+            }
+        }
     }
-    s_dir = dir;
 }
 
 // Copy a line with null-termination
@@ -46,38 +61,62 @@ static inline void copy_line(char* dst, const char* src) {
 }
 
 // Start editing a file
-void Editor::start(const char* filename, FSNode* current_dir) {
+void Editor::start(const char* path) {
     active = true;
     status_message[0] = '\0';
 
-    this->current_dir = current_dir;
-    strncpy(this->filename, filename, sizeof(this->filename) - 1);
-    this->filename[sizeof(this->filename) - 1] = '\0';
+    if (!path || !*path) path = "/edit.txt";
+    strncpy(filepath, path, sizeof(filepath) - 1);
+    filepath[sizeof(filepath) - 1] = '\0';
 
-    FSNode* file = fs_find_child(current_dir, this->filename);
-    if (file && file->type == FS_FILE && file->data && file->size > 0) {
-        size_t size = file->size;
-        uint8_t* data = file->data;
-        int lines = 0;
-        size_t pos = 0;
-
-        while (pos < size && lines < EDITOR_MAX_LINES) {
-            size_t start = pos;
-            while (pos < size && data[pos] != '\n') pos++;
-            size_t len = pos - start;
-            if (len >= EDITOR_LINE_LENGTH) len = EDITOR_LINE_LENGTH - 1;
-            memcpy(buffer[lines], data + start, len);
-            buffer[lines][len] = '\0';
-            lines++; pos++;
-        }
-        if (lines == 0) {
-            buffer[0][0] = '\0';
-            lines = 1;
-        }
-        line_count = lines;
+    const char* slash = strrchr(filepath, '/');
+    if (slash && slash[1]) {
+        strncpy(filename, slash + 1, sizeof(filename) - 1);
     } else {
-        line_count = 1;
-        buffer[0][0] = '\0';
+        strncpy(filename, filepath, sizeof(filename) - 1);
+    }
+    filename[sizeof(filename) - 1] = '\0';
+
+    line_count = 1;
+    buffer[0][0] = '\0';
+
+    vfs_dirent_t info;
+    if (vfs_stat(filepath, &info) == VFS_SUCCESS &&
+        info.type == VFS_TYPE_FILE && info.size > 0) {
+        size_t size = info.size;
+        char* data = static_cast<char*>(kmalloc(size + 1));
+        if (data) {
+            vfs_file_t file;
+            if (vfs_open(filepath, &file) == VFS_SUCCESS) {
+                size_t offset = 0;
+                while (offset < size) {
+                    int read = vfs_read(&file, data + offset, size - offset);
+                    if (read <= 0) break;
+                    offset += static_cast<size_t>(read);
+                }
+                vfs_close(&file);
+                data[offset] = '\0';
+
+                int lines = 0;
+                size_t pos = 0;
+                while (pos < offset && lines < EDITOR_MAX_LINES) {
+                    size_t start = pos;
+                    while (pos < offset && data[pos] != '\n') pos++;
+                    size_t len = pos - start;
+                    if (len >= EDITOR_LINE_LENGTH) len = EDITOR_LINE_LENGTH - 1;
+                    memcpy(buffer[lines], data + start, len);
+                    buffer[lines][len] = '\0';
+                    lines++;
+                    if (pos < offset && data[pos] == '\n') pos++;
+                }
+                if (lines == 0) {
+                    buffer[0][0] = '\0';
+                    lines = 1;
+                }
+                line_count = lines;
+            }
+            kfree(data);
+        }
     }
 
     cursor_line = 0;
@@ -96,43 +135,30 @@ bool Editor::is_active() {
 void Editor::exit(bool save) {
     printf("\n");
     if (save) {
-        if (!current_dir) {
-            printf("Error: no directory to save in.\n");
+        vfs_remove(filepath);
+        if (vfs_create(filepath) != VFS_SUCCESS) {
+            printf("Error: could not create '%s'.\n", filepath);
             return;
         }
-        FSNode* file = fs_find_child(current_dir, filename);
-        if (!file) {
-            file = fs_create_node(filename, FS_FILE);
-            if (file) fs_add_child(current_dir, file);
+        vfs_file_t file;
+        if (vfs_open(filepath, &file) != VFS_SUCCESS) {
+            printf("Error: could not open '%s' for writing.\n", filepath);
+            return;
         }
-        if (file && file->type == FS_FILE) {
-            while (line_count > 1 && strlen(buffer[line_count - 1]) == 0) {
-                --line_count;
-            }
-            size_t total = 0;
-            for (int i = 0; i < line_count; ++i)
-                total += strlen(buffer[i]) + 1;
 
-            if (file->data) kfree(file->data);
-            uint8_t* data = static_cast<uint8_t*>(kmalloc(total + 1));
-            if (!data) {
-                printf("Memory allocation failed.\n");
-                return;
+        for (int i = 0; i < line_count; ++i) {
+            const char* line = buffer[i];
+            size_t len = strlen(line);
+            if (len) {
+                if (vfs_write(&file, line, len) != (int)len) {
+                    printf("Error writing to '%s'.\n", filepath);
+                    break;
+                }
             }
-            file->data = data;
-            size_t pos = 0;
-            for (int i = 0; i < line_count; ++i) {
-                size_t len = strlen(buffer[i]);
-                memcpy(data + pos, buffer[i], len);
-                pos += len;
-                data[pos++] = '\n';
-            }
-            data[pos] = '\0';
-            file->size = pos;
-            printf("File '%s' saved.\n", filename);
-        } else {
-            printf("Error: could not create or write file '%s'.\n", filename);
+            vfs_write(&file, "\n", 1);
         }
+        vfs_close(&file);
+        printf("File '%s' saved.\n", filepath);
     } else {
         printf("Edit aborted.\n");
     }
@@ -401,8 +427,8 @@ void Editor::handle_key(keyboard_event ke) {
 }
 
 // Editor interface functions
-void editor_start(const char* filename, FSNode* current_dir) {
-    editor_instance.start(filename, current_dir);
+void editor_start(const char* path) {
+    editor_instance.start(path);
 }
 bool editor_is_active() {
     return editor_instance.is_active();
@@ -419,8 +445,8 @@ extern "C" void editor_entry() {
     }
 
     // Use the safe copied params
-    printf("[editor] starting file '%s'\n", s_filename[0] ? s_filename : "untitled");
-    editor_start(s_filename[0] ? s_filename : (const char*)"untitled", s_dir);
+    printf("[editor] starting file '%s'\n", s_filepath[0] ? s_filepath : "(null)");
+    editor_start(s_filepath[0] ? s_filepath : (const char*)"/edit.txt");
     IOEvent io_event;
     while (editor_is_active()) {
         if (!process_poll_event(&io_event)) {
