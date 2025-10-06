@@ -12,6 +12,7 @@
 #include <kernel/process.h>
 #include "kernel/memory.h"
 #include <kernel/scheduler.h>
+#include <process.h>
 
 extern Terminal terminal;
 extern shell_command_t commands[];
@@ -23,10 +24,13 @@ extern shell_command_t commands[];
 
 #define SHELL_PWD_MAX_DEPTH  32
 
+static Process* g_shell_process = nullptr;
+
 typedef struct {
     char     buffer[SHELL_BUFFER_SIZE];
     size_t   index;
     bool     input_enabled;
+    bool     prompt_visible;
     FSNode*  cwd;
     char     history[SHELL_HISTORY_SIZE][SHELL_BUFFER_SIZE];
     size_t   history_count;
@@ -51,12 +55,14 @@ static void clear_line(size_t length) {
 // Print the shell prompt
 static void shell_print_prompt(void) {
     printf("%s", SHELL_PROMPT);
+    shell.prompt_visible = true;
 }
 
 // Initialize shell state and print welcome message
 void shell_init(void) {
     shell.index         = 0;
     shell.input_enabled = true;
+    shell.prompt_visible = false;
     shell.cwd           = fs_get_root();
     shell.history_count = 0;
     shell.history_nav   = -1;
@@ -103,6 +109,13 @@ void shell_history_reset(void) {
 
 void shell_set_input_enabled(bool enabled) {
     shell.input_enabled = enabled;
+    if (!enabled) {
+        shell.prompt_visible = false;
+    }
+}
+
+Process* shell_get_process() {
+    return g_shell_process;
 }
 
 // Parse and dispatch a command line
@@ -124,6 +137,9 @@ void shell_process_command(const char* cmd) {
 
 // Handle a keyboard event for the shell
 void shell_handle_key(keyboard_event ke) {
+    if (ke.release) {
+        return;
+    }
     if (!shell.input_enabled) return;
 
     // Up arrow: previous history
@@ -175,6 +191,7 @@ void shell_handle_key(keyboard_event ke) {
         shell_process_command(shell.buffer);
         shell.index = 0;
         shell_history_reset();
+        shell.prompt_visible = false;
         // Only print a new prompt if input is still enabled
         if (shell.input_enabled) {
             shell_print_prompt();
@@ -376,7 +393,6 @@ void cmd_edit(const char* args) {
     if (p) {
         // Give keyboard focus to the editor immediately and disable shell input
         scheduler_set_foreground(p);
-        shell.input_enabled = false;
     }
 }
 
@@ -411,10 +427,32 @@ shell_command_t commands[] = {
 
 extern "C" void shell_entry() {
     Process* proc = scheduler_current_process();
-    if (proc)
-        register_keyboard_handler(proc, shell_handle_key);
+    if (proc) {
+        g_shell_process = proc;
+        scheduler_set_foreground(proc);
+    }
     shell_init();
+    IOEvent event;
     while (1) {
-        asm volatile("hlt");
+        if (!process_poll_event(&event)) {
+            if (!process_wait_event(&event)) {
+                continue;
+            }
+        }
+        if (event.type == EVENT_PROCESS) {
+            if (event.data.process.code == PROCESS_EVENT_FOCUS_LOST) {
+                shell_set_input_enabled(false);
+            } else if (event.data.process.code == PROCESS_EVENT_FOCUS_GAINED) {
+                shell_set_input_enabled(true);
+                if (!shell.prompt_visible) {
+                    shell_print_prompt();
+                }
+            }
+            continue;
+        }
+        if (event.type == EVENT_KEYBOARD) {
+            shell_handle_key(event.data.keyboard);
+            continue;
+        }
     }
 }

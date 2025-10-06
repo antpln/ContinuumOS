@@ -69,6 +69,16 @@ int sys_get_io_event(IOEvent* out_event) {
     return pop_io_event(proc, out_event);
 }
 
+int sys_wait_io_event(registers_t* regs, IOEvent* out_event) {
+    Process* proc = scheduler_current_process();
+    if (!proc) return 0;
+    if (process_wait_for_io_event(proc, out_event)) {
+        return 1;
+    }
+    scheduler_force_switch_with_regs(regs);
+    return 0;
+}
+
 void sys_yield_with_regs(registers_t* regs) {
     (void)scheduler_current_process();
     scheduler_force_switch_with_regs(regs);
@@ -124,6 +134,12 @@ extern "C" void syscall_dispatch(registers_t* regs) {
         }
         case 0x83: // SYSCALL_EXIT
             sys_exit_with_regs(regs);
+            break;
+        case 0x84: // SYSCALL_POLL_IO_EVENT
+            regs->eax = sys_get_io_event((IOEvent*)arg1);
+            break;
+        case 0x85: // SYSCALL_WAIT_IO_EVENT
+            regs->eax = sys_wait_io_event(regs, (IOEvent*)arg1);
             break;
         // ...other syscalls...
         default:

@@ -46,5 +46,6 @@ void scheduler_start();
 // Foreground (keyboard focus) process helpers
 void scheduler_set_foreground(Process* proc);
 Process* scheduler_get_foreground();
+void scheduler_restore_foreground(Process* owner);
 
 #endif // SCHEDULER_H

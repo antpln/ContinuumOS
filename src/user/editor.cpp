@@ -5,8 +5,9 @@
 #include <kernel/vga.h>
 #include <kernel/scheduler.h>
 #include <kernel/process.h>
+#include <kernel/keyboard.h>
+#include <process.h>
 #include <utils.h>
-#include <kernel/shell.h>
 
 extern Terminal terminal;
 
@@ -379,6 +380,9 @@ void Editor::handle_arrows(keyboard_event ke) {
 
 // Handle a keyboard event in the editor
 void Editor::handle_key(keyboard_event ke) {
+    if (ke.release) {
+        return;
+    }
     if (ke.backspace) {
         handle_backspace();
     } else if (ke.enter) {
@@ -411,28 +415,30 @@ extern "C" void editor_entry() {
     printf("[editor] entry\n");
     Process* proc = scheduler_current_process();
     if (proc) {
-        register_keyboard_handler(proc, editor_handle_key);
         scheduler_set_foreground(proc);
     }
-    // Ensure shell stops echoing and prompting while editor is active
-    shell_set_input_enabled(false);
 
     // Use the safe copied params
     printf("[editor] starting file '%s'\n", s_filename[0] ? s_filename : "untitled");
     editor_start(s_filename[0] ? s_filename : (const char*)"untitled", s_dir);
+    IOEvent io_event;
     while (editor_is_active()) {
-        asm volatile("hlt");
+        if (!process_poll_event(&io_event)) {
+            if (!process_wait_event(&io_event)) {
+                continue;
+            }
+        }
+        if (io_event.type == EVENT_PROCESS) {
+            continue;
+        }
+        if (io_event.type == EVENT_KEYBOARD) {
+            editor_handle_key(io_event.data.keyboard);
+        }
     }
     printf("[editor] exit loop\n");
     if (proc) {
-        scheduler_set_foreground(nullptr);
-        register_keyboard_handler(proc, nullptr);
+        scheduler_restore_foreground(proc);
     }
-    // Re-enable shell input and print prompt, then terminate this process
-    shell_set_input_enabled(true);
-    printf("nutshell> ");
-    if (proc) {
-        kill_process(proc);
-    }
+    process_exit(0);
     while (1) asm volatile("hlt");
 }

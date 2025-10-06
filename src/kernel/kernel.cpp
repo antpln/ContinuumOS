@@ -114,10 +114,6 @@ extern "C"
                 Process* shell_proc = k_start_process("shell", shell_entry, 0, 8192);
                 (void)shell_proc;
 
-                // Start test process in /bin
-                Process* testp = k_start_process("/bin/test-proc", test_proc_entry, 0, 8192);
-                (void)testp;
-
                 __asm__ volatile("sti");
 
                 scheduler_start();

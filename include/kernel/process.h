@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "kernel/hooks.h"
 #include "kernel/keyboard.h"
+#include <sys/events.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,30 +31,22 @@ typedef struct ProcessState {
 
 typedef void (*KeyboardHandler)(keyboard_event);
 
+#define PROCESS_MAGIC 0x50524F43u // 'PROC'
+#define EVENT_QUEUE_GUARD 0xE17E17E1u
 #define MAX_EVENT_QUEUE_SIZE 128
 #define MAX_HOOKS_PER_PROCESS 8
 
-typedef enum {
-    EVENT_NONE = 0,
-    EVENT_KEYBOARD,
-    // Future: EVENT_MOUSE, EVENT_TIMER, EVENT_FILE, etc.
-} EventType;
-
 typedef struct {
-    EventType type;
-    union {
-        keyboard_event keyboard;
-        // Future: mouse_event mouse; file_event file; etc.
-    } data;
-} IOEvent;
-
-typedef struct {
+    uint32_t guard_front;
     IOEvent queue[MAX_EVENT_QUEUE_SIZE];
     int head;
     int tail;
+    int count;
+    uint32_t guard_back;
 } EventQueue;
 
 typedef struct Process {
+    uint32_t magic;
     int pid;
     const char* name;
     ProcessState current_state;
@@ -75,6 +68,8 @@ void set_process_tickets(Process* proc, int tickets); // Set tickets for a proce
 // IO event queue helpers
 void push_io_event(Process* proc, IOEvent event);
 int pop_io_event(Process* proc, IOEvent* out_event);
+int process_poll_io_event(Process* proc, IOEvent* out_event);
+int process_wait_for_io_event(Process* proc, IOEvent* out_event);
 
 // Register a hook for a process
 int process_register_hook(Process* proc, HookType type, uint64_t trigger_value);

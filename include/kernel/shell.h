@@ -6,6 +6,8 @@
 #include <kernel/keyboard.h>
 #include <kernel/isr.h>
 
+struct Process;
+
 typedef void (*command_func_t)(const char* args);
 
 typedef struct shell_command_t {
@@ -27,5 +29,8 @@ void shell_init();
 
 // Enable or disable shell input (used when a foreground app takes focus)
 void shell_set_input_enabled(bool enabled);
+
+// Retrieve the shell process instance (if running)
+Process* shell_get_process();
 
 #endif // SHELL_H

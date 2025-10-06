@@ -99,6 +99,9 @@ iso: $(KERNEL_ELF)
 run: $(KERNEL_ELF)
 	$(QEMU) $(QEMU_FLAGS)
 
+runlog: $(KERNEL_ELF)
+	$(QEMU) $(QEMU_FLAGS) -d int,cpu_reset -D qemu.log
+
 runiso: iso
 	$(QEMU) -cdrom kernel.iso
 

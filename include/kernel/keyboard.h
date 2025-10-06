@@ -2,6 +2,7 @@
 #define KEYBOARD_H
 
 #include "isr.h"
+#include <stdbool.h>
 
 #define KBD_DATA_PORT 0x60
 #define KBD_STATUS_PORT 0x64
@@ -34,5 +35,6 @@ void keyboard_install();
 void keyboard_poll();
 char kb_to_ascii(keyboard_event event);
 void keyboard_buffer_push(char c);
+void keyboard_service_pending();
 
 #endif // KEYBOARD_H

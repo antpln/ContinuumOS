@@ -1,6 +1,7 @@
 #ifndef LIBC_SYSCALL_H
 #define LIBC_SYSCALL_H
 #include <stdint.h>
+#include <sys/events.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -10,6 +11,9 @@ extern "C" {
 #define SYSCALL_YIELD 0x80
 #define SYSCALL_YIELD_FOR_EVENT 0x81
 #define SYSCALL_START_PROCESS 0x82
+#define SYSCALL_EXIT 0x83
+#define SYSCALL_POLL_IO_EVENT 0x84
+#define SYSCALL_WAIT_IO_EVENT 0x85
 
 static inline void syscall_yield() {
     asm volatile ("int $0x80" : : "a"(SYSCALL_YIELD));
@@ -38,6 +42,37 @@ static inline int syscall_start_process(const char* name, void (*entry)(), int s
         "int $0x80"
         : "=a"(ret)
         : "a"(SYSCALL_START_PROCESS), "b"(name), "c"(entry), "d"(speculative), "S"(stack_size)
+    );
+    return ret;
+}
+
+static inline void syscall_exit(int status) {
+    asm volatile (
+        "int $0x80"
+        :
+        : "a"(SYSCALL_EXIT), "b"(status)
+        : "memory"
+    );
+}
+
+static inline int syscall_poll_io_event(IOEvent* event) {
+    int ret;
+    asm volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(SYSCALL_POLL_IO_EVENT), "b"(event)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int syscall_wait_io_event(IOEvent* event) {
+    int ret;
+    asm volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(SYSCALL_WAIT_IO_EVENT), "b"(event)
+        : "memory"
     );
     return ret;
 }

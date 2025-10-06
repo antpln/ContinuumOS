@@ -20,6 +20,8 @@ extern "C" void isr_handler(registers_t *regs)
 {
     // Print the interrupt code (exception number)
     printf("ISR Exception: Interrupt %d, Error Code: %d\n", regs->int_no, regs->err_code);
+    printf("  EIP=0x%x EAX=0x%x EBX=0x%x ECX=0x%x EDX=0x%x\n", regs->eip, regs->eax, regs->ebx, regs->ecx, regs->edx);
+    printf("  ESP=0x%x EBP=0x%x ESI=0x%x EDI=0x%x EFLAGS=0x%x\n", regs->esp, regs->ebp, regs->esi, regs->edi, regs->eflags);
 
     // Handle critical exceptions like page faults (Interrupt 14)
     if(interrupt_handlers[regs->int_no]) {
@@ -30,7 +32,7 @@ extern "C" void isr_handler(registers_t *regs)
     // Halt if it's a critical CPU exception
     if (regs->int_no < 32)
     {
-        PANIC("Unhandled CPU exception %d", regs->int_no);
+        PANIC("Unhandled CPU exception %d at EIP=0x%x", regs->int_no, regs->eip);
     }
 }
 
@@ -39,6 +41,7 @@ extern "C" void irq_handler(registers_t *regs)
 {
     // Send an EOI (end of interrupt) signal to the PICs
     uint32_t irq_nb = regs->int_no - 32;
+    (void)irq_nb; // debug disabled
 
     if (regs->int_no >= 40)
     {

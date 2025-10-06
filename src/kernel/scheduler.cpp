@@ -16,16 +16,24 @@ static registers_t* last_regs = NULL;
 // Trampoline to complete a context switch after returning from an interrupt/syscall
 extern "C" void switch_to_trampoline();
 // Next context to switch to (used by the trampoline)
-extern "C" CPUContext* g_next_context;
-extern "C" CPUContext* g_next_context = nullptr;
+extern "C" {
+CPUContext* g_next_context = nullptr;
+}
 
 static Process* foreground_proc = nullptr;
+static Process* foreground_stack[MAX_PROCESSES];
+static int foreground_stack_top = -1;
 
 void scheduler_init() {
     process_count = 0;
     current_process_idx = -1;
     for (int i = 0; i < MAX_PROCESSES; ++i) {
         process_table[i] = NULL;
+    }
+    foreground_proc = nullptr;
+    foreground_stack_top = -1;
+    for (int i = 0; i < MAX_PROCESSES; ++i) {
+        foreground_stack[i] = nullptr;
     }
 }
 
@@ -138,7 +146,9 @@ void set_process_tickets(Process* proc, int tickets) {
 // Called by process to yield and wait for an event
 void process_yield_for_event(Process* proc, HookType event_type, uint64_t event_value) {
     if (!proc) return;
-    process_register_hook(proc, event_type, event_value);
+    if (!process_has_matching_hook(proc, event_type, event_value)) {
+        process_register_hook(proc, event_type, event_value);
+    }
     proc->alive = 0; // Mark as not runnable until event is met
 }
 
@@ -146,10 +156,33 @@ void process_yield_for_event(Process* proc, HookType event_type, uint64_t event_
 void scheduler_resume_processes_for_event(HookType event_type, uint64_t event_value) {
     for (int i = 0; i < MAX_PROCESSES; ++i) {
         Process* proc = process_table[i];
-        if (proc && !proc->alive && process_has_matching_hook(proc, event_type, event_value)) {
+        if (proc && process_has_matching_hook(proc, event_type, event_value)) {
             proc->alive = 1; // Mark as runnable
-            process_remove_hook(proc, event_type, event_value);
+            while (process_remove_hook(proc, event_type, event_value) == 0) {
+                // Remove all matching hooks in case multiple were registered
+            }
         }
+    }
+}
+
+static void dispatch_focus_event(Process* proc, int code, int value) {
+    if (!proc) return;
+    IOEvent event;
+    event.type = EVENT_PROCESS;
+    event.data.process.code = code;
+    event.data.process.value = value;
+    push_io_event(proc, event);
+    scheduler_resume_processes_for_event(HookType::SIGNAL, (uint64_t)proc->pid);
+}
+
+static void scheduler_switch_foreground(Process* prev, Process* next) {
+    if (prev == next) return;
+    foreground_proc = next;
+    if (prev && prev != next) {
+        dispatch_focus_event(prev, PROCESS_EVENT_FOCUS_LOST, next ? next->pid : -1);
+    }
+    if (next && prev != next) {
+        dispatch_focus_event(next, PROCESS_EVENT_FOCUS_GAINED, next->pid);
     }
 }
 
@@ -214,9 +247,26 @@ void scheduler_start() {
 }
 
 void scheduler_set_foreground(Process* proc) {
-    foreground_proc = proc;
+    if (foreground_proc == proc) return;
+    Process* previous = foreground_proc;
+    if (previous && previous != proc) {
+        if (foreground_stack_top + 1 < MAX_PROCESSES) {
+            foreground_stack[++foreground_stack_top] = previous;
+        }
+    }
+    scheduler_switch_foreground(previous, proc);
 }
 
 Process* scheduler_get_foreground() {
     return foreground_proc;
+}
+
+void scheduler_restore_foreground(Process* owner) {
+    if (owner && owner != foreground_proc) return;
+    Process* previous = foreground_proc;
+    Process* target = nullptr;
+    if (foreground_stack_top >= 0) {
+        target = foreground_stack[foreground_stack_top--];
+    }
+    scheduler_switch_foreground(previous, target);
 }

@@ -10,8 +10,53 @@
 #include "kernel/scheduler.h"
 #include "kernel/process.h"
 
+#ifdef DEBUG
+#define KB_DEBUG(...) debug(__VA_ARGS__)
+#else
+#define KB_DEBUG(...) ((void)0)
+#endif
+
 static bool shift_pressed = false;
 static bool caps_lock_active = false;
+
+static void dispatch_keyboard_event(keyboard_event event, const char* source) {
+    char c = kb_to_ascii(event);
+    if (!event.release && c) {
+        keyboard_buffer_push(c);
+    }
+
+    Process* target = scheduler_get_foreground();
+    if (target) {
+        IOEvent io_event;
+        io_event.type = EVENT_KEYBOARD;
+        io_event.data.keyboard = event;
+        push_io_event(target, io_event);
+        scheduler_resume_processes_for_event(HookType::SIGNAL, (uint64_t)target->pid);
+        return;
+    }
+
+    target = shell_get_process();
+    if (target) {
+        IOEvent io_event;
+        io_event.type = EVENT_KEYBOARD;
+        io_event.data.keyboard = event;
+        push_io_event(target, io_event);
+        scheduler_resume_processes_for_event(HookType::SIGNAL, (uint64_t)target->pid);
+        return;
+    }
+
+    target = scheduler_current_process();
+    if (target) {
+        IOEvent io_event;
+        io_event.type = EVENT_KEYBOARD;
+        io_event.data.keyboard = event;
+        push_io_event(target, io_event);
+        scheduler_resume_processes_for_event(HookType::SIGNAL, (uint64_t)target->pid);
+        return;
+    }
+
+    shell_handle_key(event);
+}
 
 static uint8_t scancode_to_ascii[128] = {
     0,  0,  '1','2','3','4','5','6','7','8','9','0','-','=', 0,  0,
@@ -95,33 +140,15 @@ keyboard_event read_keyboard() {
 void keyboard_callback(registers_t *regs) {
     (void)regs; // Unused
     keyboard_event event = read_keyboard();
-    char c = kb_to_ascii(event);
-    if (c) {
-        keyboard_buffer_push(c);
-    }
+    dispatch_keyboard_event(event, "irq");
+    pic_send_eoi(1);
+}
 
-    Process* fg = scheduler_get_foreground();
-    if (fg) {
-        // Route exclusively to foreground process
-        IOEvent io_event;
-        io_event.type = EVENT_KEYBOARD;
-        io_event.data.keyboard = event;
-        push_io_event(fg, io_event);
-        if (fg->keyboard_handler)
-            fg->keyboard_handler(event);
-        return;
-    }
-
-    // No foreground app: send to current process if it handles keys, else to shell
-    Process* current = scheduler_current_process();
-    if (current && current->keyboard_handler) {
-        IOEvent io_event;
-        io_event.type = EVENT_KEYBOARD;
-        io_event.data.keyboard = event;
-        push_io_event(current, io_event);
-        current->keyboard_handler(event);
-    } else {
-        shell_handle_key(event);
+void keyboard_service_pending() {
+    while (inb(KBD_STATUS_PORT) & 0x01) {
+        keyboard_event event = read_keyboard();
+        dispatch_keyboard_event(event, "poll");
+        pic_send_eoi(1);
     }
 }
 
@@ -153,7 +180,7 @@ void keyboard_enable() {
     for (int i = 0; i < 1000; ++i) {
         if (inb(0x64) & 1) {
             uint8_t response = inb(0x60);
-            debug("[KB] Keyboard response: 0x%x", response);
+            KB_DEBUG("[KB] Keyboard response: 0x%x", response);
             if (response == 0xFA) return;
         }
     }

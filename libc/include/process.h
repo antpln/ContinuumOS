@@ -2,6 +2,7 @@
 #define LIBC_PROCESS_H
 
 #include <stdint.h>
+#include <sys/events.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -13,6 +14,12 @@ void yield();
 void yield_for_event(int hook_type, uint64_t trigger_value);
 // Start a new process
 int start_process(const char* name, void (*entry)(), int speculative, uint32_t stack_size);
+// Poll for an IO event without blocking (returns 1 if event populated, 0 otherwise)
+int process_poll_event(IOEvent* event);
+// Wait for an IO event (blocks cooperatively until an event arrives)
+int process_wait_event(IOEvent* event);
+// Terminate the current process with the given status code
+void process_exit(int status);
 
 #ifdef __cplusplus
 }
