@@ -1,7 +1,7 @@
 #ifndef KERNEL_EDITOR_H
 #define KERNEL_EDITOR_H
 
-#include <kernel/vfs.h>
+#include <kernel/ramfs.h>
 #include <kernel/keyboard.h>
 
 #define EDITOR_MAX_LINES    128
@@ -11,8 +11,8 @@ class Editor {
 public:
     Editor() = default;
 
-    // Start editing a file at the given path
-    void start(const char* path);
+    // Start editing `filename` in directory `current_dir`
+    void start(const char* filename, FSNode* current_dir);
 
     // True if we’re in editor mode
     bool is_active(void);
@@ -44,13 +44,13 @@ private:
     int  viewport_offset;
 
     char filename[64];
-    char filepath[VFS_MAX_PATH];
+    FSNode* current_dir;
     bool    active;
 
     char status_message[EDITOR_LINE_LENGTH]; // status bar message
 };
 
-void editor_start(const char* path);
+void editor_start(const char* filename, FSNode* current_dir);
 bool editor_is_active(void);
 void editor_handle_key(keyboard_event ke);
 

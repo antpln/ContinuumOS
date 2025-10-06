@@ -21,6 +21,7 @@ void panic(const char* msg, const char* file, int line, const char* func, ...) {
         printf("Details: ");
         vprintf(msg, args);
         printf("\n");
+    }
     printf("\n==============================================\n");
     va_end(args);
     while (1) {
@@ -35,15 +36,21 @@ void debug(const char* fmt, ...) {
     vprintf(fmt, args);
     printf("\n");
     va_end(args);
+#else
+    (void)fmt;
 #endif
 }
 void success(const char* fmt, ...) {
+#ifdef DEBUG
     va_list args;
     va_start(args, fmt);
     printf("[SUCCESS] ");
     vprintf(fmt, args);
     printf("\n");
     va_end(args);
+#else
+    (void)fmt;
+#endif
 }
 void error(const char* fmt, ...) {
     va_list args;
@@ -61,5 +68,7 @@ void test(const char* fmt, ...) {
     vprintf(fmt, args);
     printf("\n");
     va_end(args);
+#else
+    (void)fmt;
 #endif
 }

@@ -21,10 +21,6 @@ extern shell_command_t commands[];
 
 #define SHELL_BUFFER_SIZE    256
 #define SHELL_HISTORY_SIZE   16
-#define SHELL_PROMPT         "nutshell> "
-#define SHELL_PROMPT_LEN     (sizeof(SHELL_PROMPT) - 1)
-
-#define SHELL_PWD_MAX_DEPTH  32
 
 static Process* g_shell_process = nullptr;
 
@@ -36,6 +32,7 @@ typedef struct {
     char     history[SHELL_HISTORY_SIZE][SHELL_BUFFER_SIZE];
     size_t   history_count;
     int      history_nav;
+    size_t   prompt_length;
 } ShellState;
 
 static ShellState shell;
@@ -55,7 +52,35 @@ static void clear_line(size_t length) {
 
 // Print the shell prompt
 static void shell_print_prompt(void) {
-    printf("%s", SHELL_PROMPT);
+    const char* cwd = vfs_getcwd();
+    if (!cwd || !cwd[0]) {
+        cwd = "/";
+    }
+    static const char prefix[] = "nutshell ";
+    static const char suffix[] = "> ";
+    char prompt[VFS_MAX_PATH + 16];
+    size_t pos = 0;
+
+    size_t prefix_len = sizeof(prefix) - 1;
+    memcpy(prompt + pos, prefix, prefix_len);
+    pos += prefix_len;
+
+    size_t cwd_len = strlen(cwd);
+    size_t max_cwd = (sizeof(prompt) - 1) - pos - (sizeof(suffix) - 1);
+    if (cwd_len > max_cwd) {
+        cwd_len = max_cwd;
+    }
+    memcpy(prompt + pos, cwd, cwd_len);
+    pos += cwd_len;
+
+    size_t suffix_len = sizeof(suffix) - 1;
+    memcpy(prompt + pos, suffix, suffix_len);
+    pos += suffix_len;
+
+    prompt[pos] = '\0';
+
+    printf("%s", prompt);
+    shell.prompt_length = pos;
     shell.prompt_visible = true;
 }
 
@@ -66,6 +91,7 @@ void shell_init(void) {
     shell.prompt_visible = false;
     shell.history_count = 0;
     shell.history_nav   = -1;
+    shell.prompt_length = 0;
     printf("Welcome to nutshell!\n");
     shell_print_prompt();
 }
@@ -146,7 +172,7 @@ void shell_handle_key(keyboard_event ke) {
     if (ke.up_arrow) {
         const char* prev = shell_history_prev();
         if (prev) {
-            size_t len = SHELL_PROMPT_LEN + shell.index;
+            size_t len = shell.prompt_length + shell.index;
             clear_line(len);
             safe_strncpy(shell.buffer, prev, SHELL_BUFFER_SIZE);
             shell.index = strlen(shell.buffer);
@@ -159,7 +185,7 @@ void shell_handle_key(keyboard_event ke) {
     // Down arrow: next history
     if (ke.down_arrow) {
         const char* next = shell_history_next();
-        size_t len = SHELL_PROMPT_LEN + shell.index;
+        size_t len = shell.prompt_length + shell.index;
         clear_line(len);
         if (next && *next) {
             safe_strncpy(shell.buffer, next, SHELL_BUFFER_SIZE);
@@ -458,51 +484,81 @@ void cmd_history(const char* args) {
 // Open file in editor
 void cmd_edit(const char* args) {
     if (!args || !*args) {
-        printf("Usage: edit <file>\n");
+        printf("Usage: edit <path>\n");
         return;
     }
 
-    char path[VFS_MAX_PATH];
-    if (args[0] != '/') {
+    char combined[VFS_MAX_PATH];
+    if (args[0] == '/') {
+        strncpy(combined, args, sizeof(combined) - 1);
+        combined[sizeof(combined) - 1] = '\0';
+    } else {
         const char* cwd = vfs_getcwd();
         size_t cwd_len = strlen(cwd);
-        size_t args_len = strlen(args);
-        size_t extra = (strcmp(cwd, "/") == 0) ? 0 : 1;
-        if (cwd_len + extra + args_len >= sizeof(path)) {
-            printf("edit: path too long\n");
-            return;
+        size_t pos = 0;
+        if (cwd_len >= sizeof(combined)) cwd_len = sizeof(combined) - 1;
+        memcpy(combined, cwd, cwd_len);
+        pos = cwd_len;
+        if (pos == 0 || combined[pos - 1] != '/') {
+            if (pos + 1 < sizeof(combined)) {
+                combined[pos++] = '/';
+            }
         }
-        strcpy(path, cwd);
-        if (extra) {
-            path[cwd_len] = '/';
-            path[cwd_len + 1] = '\0';
+        size_t remaining = (sizeof(combined) > pos) ? (sizeof(combined) - pos - 1) : 0;
+        size_t arg_len = strlen(args);
+        if (arg_len > remaining) {
+            arg_len = remaining;
         }
-        strcat(path, args);
-    } else {
-        if (strlen(args) >= sizeof(path)) {
-            printf("edit: path too long\n");
-            return;
-        }
-        strncpy(path, args, sizeof(path) - 1);
-        path[sizeof(path) - 1] = '\0';
+        memcpy(combined + pos, args, arg_len);
+        combined[pos + arg_len] = '\0';
+    }
+
+    char normalized[VFS_MAX_PATH];
+    if (vfs_normalize_path(combined, normalized) != VFS_SUCCESS) {
+        printf("edit: failed to resolve path '%s'\n", combined);
+        return;
     }
 
     vfs_dirent_t info;
-    if (vfs_stat(path, &info) != VFS_SUCCESS) {
-        if (vfs_create(path) != VFS_SUCCESS) {
-            printf("edit: cannot create '%s'\n", path);
-            return;
-        }
-    } else if (info.type != VFS_TYPE_FILE) {
-        printf("edit: '%s' is not a file\n", path);
+    if (vfs_stat(normalized, &info) == VFS_SUCCESS && info.type == VFS_TYPE_DIRECTORY) {
+        printf("edit: '%s' is a directory\n", normalized);
         return;
     }
 
-    editor_set_params(path);
-    Process* p = k_start_process("editor", editor_entry, 0, 8192);
-    if (p) {
-        scheduler_set_foreground(p);
+    char parent[VFS_MAX_PATH];
+    strncpy(parent, normalized, sizeof(parent) - 1);
+    parent[sizeof(parent) - 1] = '\0';
+    char* slash = strrchr(parent, '/');
+    if (slash) {
+        if (slash == parent) {
+            if (*(slash + 1) == '\0') {
+                strcpy(parent, "/");
+            } else {
+                slash[1] = '\0';
+            }
+        } else {
+            *slash = '\0';
+        }
     }
+    if (parent[0] == '\0') {
+        strcpy(parent, "/");
+    }
+
+    vfs_dirent_t parent_info;
+    if (vfs_stat(parent, &parent_info) != VFS_SUCCESS || parent_info.type != VFS_TYPE_DIRECTORY) {
+        printf("edit: parent directory '%s' not found\n", parent);
+        return;
+    }
+
+    editor_set_params(normalized);
+    Process* p = k_start_process("editor", editor_entry, 0, 8192);
+    if (!p) {
+        printf("edit: failed to start editor process\n");
+        return;
+    }
+
+    scheduler_set_foreground(p);
+    shell_set_input_enabled(false);
 }
 
 // List block devices
@@ -600,7 +656,21 @@ void cmd_fat32_cat(const char* args) {
     strcat(path, args);
     
     printf("Reading FAT32 file via VFS: %s\n", path);
-    cmd_cat(path);
+    
+    vfs_file_t file;
+    if (vfs_open(path, &file) != VFS_SUCCESS) {
+        printf("Failed to open file: %s\n", args);
+        return;
+    }
+
+    char buffer[256];
+    int bytes;
+    while ((bytes = vfs_read(&file, buffer, sizeof(buffer) - 1)) > 0) {
+        buffer[bytes] = '\0';
+        printf("%s", buffer);
+    }
+    printf("\n");
+    vfs_close(&file);
 }
 
 // Print memory usage information
