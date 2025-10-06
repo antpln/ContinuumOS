@@ -128,6 +128,18 @@ char *strcpy(char *dst, const char *src)
     return ret;
 }
 
+char *strcat(char *dst, const char *src)
+{
+    char *ret = dst;
+    // Find end of destination string
+    while (*dst != '\0')
+        dst++;
+    // Append source string
+    while ((*dst++ = *src++) != '\0')
+        ;
+    return ret;
+}
+
 char *strtok(char *str, const char *delim)
 {
     static char *last = NULL;

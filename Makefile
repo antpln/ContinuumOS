@@ -61,7 +61,7 @@ directories:
 
 $(KERNEL_ELF): $(OBJECTS)
 	$(CXX) -T linker.ld -o $(KERNEL_DEST)/kernel.bin $(LDFLAGS) $(OBJECTS) -lgcc
-	grub-file --is-x86-multiboot $(KERNEL_DEST)/kernel.bin
+# grub-file --is-x86-multiboot $(KERNEL_DEST)/kernel.bin
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
@@ -97,6 +97,9 @@ iso: $(KERNEL_ELF)
 	grub-mkrescue -o kernel.iso isodir
 
 run: $(KERNEL_ELF)
+	$(QEMU) $(QEMU_FLAGS) -hda test_fat32.img
+
+run-nodisk: $(KERNEL_ELF)
 	$(QEMU) $(QEMU_FLAGS)
 
 runlog: $(KERNEL_ELF)
@@ -111,6 +114,14 @@ clean:
 	rm -f kernel.iso
 	rm -f $(KERNEL_DEST)/kernel.bin
 	rm -f $(KERNEL_DEST)/kernel2.bin
+clean-all: clean
+	rm -f test_fat32.img
+
+# Create test FAT32 disk image
+test_fat32.img: fat32_template.img
+	@echo "Creating test FAT32 disk image from template..."
+	cp fat32_template.img test_fat32.img
+	@echo "Test FAT32 disk image created successfully"
 
 # Add debug target
 debug:

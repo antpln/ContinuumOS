@@ -12,12 +12,15 @@
 #include "kernel/timer.h"
 #include "kernel/shell.h"
 #include "kernel/ramfs.h"
+#include "kernel/vfs.h"
 #include "kernel/debug.h"
 #include "kernel/tests/memtest.h"
 #include "kernel/tests/pagetest.h"
 #include "kernel/tests/heaptest.h"
 #include "kernel/scheduler.h"
 #include <kernel/process.h>
+#include "kernel/blockdev.h"
+#include "kernel/fat32.h"
 
 #include "utils.h"
 #include <stdio.h> // Changed back to just stdio.h since include path is set in Makefile
@@ -43,6 +46,8 @@ extern "C"
        ~H| |/
             ~)";
         (void)ascii_guitar;
+		(void)multiboot_info; // Suppress unused parameter warning
+		
 		terminal.initialize();
 
 		// Initialize the scheduler (round-robin)
@@ -67,9 +72,43 @@ extern "C"
 		// Set up heap
 		init_heap();
 
+		// Initialize block devices (IDE, etc.)
+		blockdev_init();
+
+		// Initialize FAT32 support
+		fat32_init();
+
 		// Initialize the RAMFS.
 		fs_init();
-
+		// Initialize VFS (Virtual File System)
+		vfs_init();
+		// Mount RamFS at root
+		ramfs_vfs_mount("/");
+		// Create /mnt directory for mount points
+		debug("Creating /mnt directory...");
+		if (vfs_mkdir("/mnt") == VFS_SUCCESS) {
+			success("/mnt directory created successfully");
+		} else {
+			error("Failed to create /mnt directory");
+		}
+		// Try to mount FAT32 if available
+		fat32_vfs_mount("/mnt/fat32", 0);
+		// Create some built-in files using VFS
+		debug("Creating /README file via VFS...");
+		if (vfs_create("/README") == VFS_SUCCESS) {
+			success("README file created successfully");
+			
+			// Write content to the file
+			vfs_file_t file;
+			if (vfs_open("/README", &file) == VFS_SUCCESS) {
+				const char *msg = "Welcome to ContinuumOS!";
+				int bytes_written = vfs_write(&file, msg, strlen(msg));
+				debug("Wrote %d bytes to README", bytes_written);
+				vfs_close(&file);
+			}
+		} else {
+			error("Failed to create README file");
+		}
 		#ifdef TEST
 		MemoryTester mem_tester;
 		if (!mem_tester.test_allocation()) {

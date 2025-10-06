@@ -19,7 +19,7 @@ void register_interrupt_handler(uint8_t n, isr_t handler)
 extern "C" void isr_handler(registers_t *regs)
 {
     // Print the interrupt code (exception number)
-    printf("ISR Exception: Interrupt %d, Error Code: %d\n", regs->int_no, regs->err_code);
+    error("ISR Exception: Interrupt %d, Error Code: %d", regs->int_no, regs->err_code);
     printf("  EIP=0x%x EAX=0x%x EBX=0x%x ECX=0x%x EDX=0x%x\n", regs->eip, regs->eax, regs->ebx, regs->ecx, regs->edx);
     printf("  ESP=0x%x EBP=0x%x ESI=0x%x EDI=0x%x EFLAGS=0x%x\n", regs->esp, regs->ebp, regs->esi, regs->edi, regs->eflags);
 
@@ -40,6 +40,7 @@ extern "C" void isr_handler(registers_t *regs)
 extern "C" void irq_handler(registers_t *regs)
 {
     // Send an EOI (end of interrupt) signal to the PICs
+    // (debug code for irq_nb removed)
     uint32_t irq_nb = regs->int_no - 32;
     (void)irq_nb; // debug disabled
 

@@ -51,8 +51,11 @@ int fs_write(FSNode* file, size_t offset, size_t size, const uint8_t* buffer);
 int fs_open(FSNode* file);
 void fs_close(int fd);
 FSNode* fs_find_by_path(const char* path);
-FSNode* fs_find_by_path(const char* path, FSNode* current);
+FSNode* fs_find_by_path_from(const char* path, FSNode* current);
 FSNode* fs_mkdir(const char* path);
 FSNode* fs_touch(const char* path);
+int fs_remove(const char* path);
+int fs_rmdir(const char* path);
+void fs_free_node(FSNode* node);
 
 #endif // RAMFS_H
