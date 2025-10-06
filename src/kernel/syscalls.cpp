@@ -50,7 +50,7 @@ char keyboard_buffer_pop() {
 char sys_getchar() {
     // Wait for a key in the buffer
     while (keyboard_buffer_head == keyboard_buffer_tail) {
-        // Optionally yield/sleep here for multitasking
+        sys_yield();
     }
     return keyboard_buffer_pop();
 }

@@ -21,7 +21,6 @@ void panic(const char* msg, const char* file, int line, const char* func, ...) {
         printf("Details: ");
         vprintf(msg, args);
         printf("\n");
-    }
     printf("\n==============================================\n");
     va_end(args);
     while (1) {

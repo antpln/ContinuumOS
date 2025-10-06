@@ -42,7 +42,7 @@ uint32_t get_ticks() {
     return timer_ticks;
 }
 
-uint32_t get_ticks_miliseconds() {
+uint32_t get_ticks_milliseconds() {
     if (timer_frequency_hz == 0) return 0;
     // Convert ticks to milliseconds: ticks * (1000 / Hz)
     return (timer_ticks * 1000) / timer_frequency_hz;

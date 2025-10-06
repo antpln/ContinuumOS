@@ -153,7 +153,6 @@ void push_io_event(Process* proc, IOEvent event) {
     static bool logged_sizes = false;
     if (!logged_sizes) {
         logged_sizes = true;
-        //debug("[process] sizeof(IOEvent)=%u sizeof(keyboard_event)=%u queue-bytes=%u", (unsigned)sizeof(IOEvent), (unsigned)sizeof(keyboard_event), (unsigned)(sizeof(IOEvent) * MAX_EVENT_QUEUE_SIZE));
     }
     uint32_t flags = irq_save();
     if (!ensure_event_queue_integrity(proc, "push")) {
@@ -173,10 +172,8 @@ void push_io_event(Process* proc, IOEvent event) {
     if (queue.count < MAX_EVENT_QUEUE_SIZE) {
         queue.count++;
     }
-    //debug("[process] push event pid=%d type=%d head=%d tail=%d count=%d", proc->pid, event.type, queue.head, queue.tail, queue.count);
     irq_restore(flags);
 }
-
 int pop_io_event(Process* proc, IOEvent* out_event) {
     uint32_t flags = irq_save();
     if (!ensure_event_queue_integrity(proc, "pop")) {
@@ -197,7 +194,6 @@ int pop_io_event(Process* proc, IOEvent* out_event) {
     irq_restore(flags);
     return 1;
 }
-
 int process_poll_io_event(Process* proc, IOEvent* out_event) {
     if (!proc || !out_event) return 0;
     return pop_io_event(proc, out_event);
