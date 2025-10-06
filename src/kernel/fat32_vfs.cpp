@@ -12,22 +12,25 @@ static int fat32_vfs_open(vfs_mount_t* mount, const char* path, vfs_file_t* file
     
     debug("[FAT32-VFS] Opening file: %s", path);
     
-    // FAT32 currently only supports root directory files
-    // Remove leading slash for FAT32 compatibility
-    const char* filename = path;
-    if (path[0] == '/') {
-        filename = path + 1;
-    }
-    
-    // Skip empty filename (root directory)
-    if (filename[0] == '\0') {
+    if (!path || path[0] == '\0' || strcmp(path, "/") == 0) {
         error("[FAT32-VFS] Cannot open root directory as file");
         return VFS_ERROR;
     }
-    
-    int fat32_fd = fat32_open(filename);
+
+    fat32_file_info_t info;
+    if (fat32_lookup_path(path, &info, NULL, NULL, NULL) != 0) {
+        error("[FAT32-VFS] Failed to locate file: %s", path);
+        return VFS_NOT_FOUND;
+    }
+
+    if (info.attributes & FAT32_ATTR_DIRECTORY) {
+        error("[FAT32-VFS] '%s' is a directory", path);
+        return VFS_ERROR;
+    }
+
+    int fat32_fd = fat32_open(path);
     if (fat32_fd < 0) {
-        error("[FAT32-VFS] Failed to open file: %s", filename);
+        error("[FAT32-VFS] Failed to open file: %s", path);
         return VFS_NOT_FOUND;
     }
     
@@ -36,7 +39,7 @@ static int fat32_vfs_open(vfs_mount_t* mount, const char* path, vfs_file_t* file
     file->position = 0;
     file->in_use = 1;
     
-    success("[FAT32-VFS] Successfully opened file: %s (fd=%d)", filename, fat32_fd);
+    success("[FAT32-VFS] Successfully opened file: %s (fd=%d)", path, fat32_fd);
     return VFS_SUCCESS;
 }
 
@@ -59,11 +62,20 @@ static int fat32_vfs_read(vfs_file_t* file, void* buffer, size_t size) {
 }
 
 static int fat32_vfs_write(vfs_file_t* file, const void* buffer, size_t size) {
-    (void)file;
-    (void)buffer;
-    (void)size;
-    
-    error("[FAT32-VFS] Write not supported (read-only filesystem)");
+    if (!file || !file->in_use) {
+        return VFS_ERROR;
+    }
+
+    int fat32_fd = (int)file->fs_handle;
+    int bytes_written = fat32_write(fat32_fd, buffer, size);
+
+    if (bytes_written >= 0) {
+        file->position += bytes_written;
+        debug("[FAT32-VFS] Wrote %d bytes", bytes_written);
+        return bytes_written;
+    }
+
+    error("[FAT32-VFS] Failed to write to FAT32 file");
     return VFS_ERROR;
 }
 
@@ -102,132 +114,135 @@ static int fat32_vfs_readdir(vfs_mount_t* mount, const char* path, vfs_dirent_t*
     
     debug("[FAT32-VFS] Reading directory: %s", path);
     
+    int alloc_slots = (max_entries > 0) ? max_entries : 1;
     // Allocate temporary buffer for FAT32 file info
-    fat32_file_info_t* fat32_entries = (fat32_file_info_t*)kmalloc(max_entries * sizeof(fat32_file_info_t));
+    fat32_file_info_t* fat32_entries = (fat32_file_info_t*)kmalloc(alloc_slots * sizeof(fat32_file_info_t));
     if (!fat32_entries) {
         error("[FAT32-VFS] Failed to allocate memory for directory listing");
         return VFS_ERROR;
     }
-    
-    // Resolve path to get directory cluster
-    char filename[FAT32_MAX_FILENAME + 1];
-    uint32_t dir_cluster = fat32_resolve_path(path, filename);
-    if (dir_cluster == 0) {
-        error("[FAT32-VFS] Directory not found: %s", path);
-        kfree(fat32_entries);
-        return VFS_ERROR;
+
+    const char* target_path = (path && path[0] != '\0') ? path : "/";
+
+    uint32_t dir_cluster;
+    if (strcmp(target_path, "/") == 0) {
+        dir_cluster = fat32_get_root_cluster();
+    } else {
+        fat32_file_info_t dir_info;
+        if (fat32_lookup_path(target_path, &dir_info, NULL, NULL, NULL) != 0) {
+            error("[FAT32-VFS] Directory not found: %s", target_path);
+            kfree(fat32_entries);
+            return VFS_ERROR;
+        }
+
+        if (!(dir_info.attributes & FAT32_ATTR_DIRECTORY)) {
+            error("[FAT32-VFS] Path is not a directory: %s", target_path);
+            kfree(fat32_entries);
+            return VFS_ERROR;
+        }
+
+        dir_cluster = dir_info.cluster;
     }
     
-    // If there's a filename, this is not a directory path
-    if (strlen(filename) > 0) {
-        error("[FAT32-VFS] Path is not a directory: %s", path);
-        kfree(fat32_entries);
-        return VFS_ERROR;
-    }
-    
-    int count = fat32_list_directory(dir_cluster, fat32_entries, max_entries);
-    
+    int count = fat32_list_directory(dir_cluster, fat32_entries, alloc_slots);
+
     if (count < 0) {
         error("[FAT32-VFS] Failed to list FAT32 directory");
         kfree(fat32_entries);
         return VFS_ERROR;
     }
-    
-    // Convert FAT32 entries to VFS entries
-    for (int i = 0; i < count; i++) {
-        strncpy(entries[i].name, fat32_entries[i].filename, VFS_MAX_NAME - 1);
-        entries[i].name[VFS_MAX_NAME - 1] = '\0';
-        entries[i].type = (fat32_entries[i].attributes & FAT32_ATTR_DIRECTORY) ? 
-                          VFS_TYPE_DIRECTORY : VFS_TYPE_FILE;
-        entries[i].size = fat32_entries[i].size;
+
+    int out = 0;
+
+    if (max_entries > 0) {
+        strncpy(entries[out].name, ".", VFS_MAX_NAME - 1);
+        entries[out].name[VFS_MAX_NAME - 1] = '\0';
+        entries[out].type = VFS_TYPE_DIRECTORY;
+        entries[out].size = 0;
+        out++;
     }
-    
+
+    if (out < max_entries) {
+        strncpy(entries[out].name, "..", VFS_MAX_NAME - 1);
+        entries[out].name[VFS_MAX_NAME - 1] = '\0';
+        entries[out].type = VFS_TYPE_DIRECTORY;
+        entries[out].size = 0;
+        out++;
+    }
+
+    for (int i = 0; i < count && out < max_entries; i++) {
+        strncpy(entries[out].name, fat32_entries[i].filename, VFS_MAX_NAME - 1);
+        entries[out].name[VFS_MAX_NAME - 1] = '\0';
+        entries[out].type = (fat32_entries[i].attributes & FAT32_ATTR_DIRECTORY) ? 
+                          VFS_TYPE_DIRECTORY : VFS_TYPE_FILE;
+        entries[out].size = fat32_entries[i].size;
+        out++;
+    }
+
     kfree(fat32_entries);
-    success("[FAT32-VFS] Found %d entries in FAT32 directory", count);
-    return count;
+    success("[FAT32-VFS] Found %d entries in FAT32 directory", out);
+    return out;
 }
 
 static int fat32_vfs_mkdir(vfs_mount_t* mount, const char* path) {
     (void)mount;
-    (void)path;
-    
-    error("[FAT32-VFS] mkdir not supported (read-only filesystem)");
-    return VFS_ERROR;
+
+    if (fat32_mkdir_path(path) != 0) {
+        return VFS_ERROR;
+    }
+    return VFS_SUCCESS;
 }
 
 static int fat32_vfs_rmdir(vfs_mount_t* mount, const char* path) {
     (void)mount;
-    (void)path;
-    
-    error("[FAT32-VFS] rmdir not supported (read-only filesystem)");
-    return VFS_ERROR;
+
+    if (fat32_rmdir_path(path) != 0) {
+        return VFS_ERROR;
+    }
+    return VFS_SUCCESS;
 }
 
 static int fat32_vfs_create(vfs_mount_t* mount, const char* path) {
     (void)mount;
-    (void)path;
-    
-    error("[FAT32-VFS] create not supported (read-only filesystem)");
-    return VFS_ERROR;
+
+    if (fat32_create(path) != 0) {
+        return VFS_ERROR;
+    }
+    return VFS_SUCCESS;
 }
 
 static int fat32_vfs_remove(vfs_mount_t* mount, const char* path) {
     (void)mount;
-    (void)path;
-    
-    error("[FAT32-VFS] remove not supported (read-only filesystem)");
-    return VFS_ERROR;
+
+    if (fat32_remove(path) != 0) {
+        return VFS_ERROR;
+    }
+    return VFS_SUCCESS;
 }
 
 static int fat32_vfs_stat(vfs_mount_t* mount, const char* path, vfs_dirent_t* info) {
     (void)mount; // Mount info available if needed
-    
-    // Handle root directory
-    if (strcmp(path, "/") == 0) {
+
+    const char* target_path = (path && path[0] != '\0') ? path : "/";
+
+    fat32_file_info_t entry;
+    if (fat32_lookup_path(target_path, &entry, NULL, NULL, NULL) != 0) {
+        return VFS_NOT_FOUND;
+    }
+
+    if (strcmp(target_path, "/") == 0) {
         strcpy(info->name, "/");
         info->type = VFS_TYPE_DIRECTORY;
         info->size = 0;
         return VFS_SUCCESS;
     }
+
+    strncpy(info->name, entry.filename, VFS_MAX_NAME - 1);
+    info->name[VFS_MAX_NAME - 1] = '\0';
+    info->type = (entry.attributes & FAT32_ATTR_DIRECTORY) ? VFS_TYPE_DIRECTORY : VFS_TYPE_FILE;
+    info->size = entry.size;
     
-    // Resolve path to get directory and filename
-    char filename[FAT32_MAX_FILENAME + 1];
-    uint32_t dir_cluster = fat32_resolve_path(path, filename);
-    if (dir_cluster == 0) {
-        return VFS_NOT_FOUND;
-    }
-    
-    // If no filename, this is a directory path
-    if (strlen(filename) == 0) {
-        // Extract directory name from path
-        const char* last_slash = strrchr(path, '/');
-        if (last_slash && last_slash != path) {
-            strncpy(info->name, last_slash + 1, VFS_MAX_NAME - 1);
-            info->name[VFS_MAX_NAME - 1] = '\0';
-        } else {
-            strcpy(info->name, "/");
-        }
-        info->type = VFS_TYPE_DIRECTORY;
-        info->size = 0;
-        return VFS_SUCCESS;
-    }
-    
-    // Find the file in the directory
-    fat32_file_info_t fat32_entries[32];
-    int count = fat32_list_directory(dir_cluster, fat32_entries, 32);
-    
-    for (int i = 0; i < count; i++) {
-        if (strcmp(fat32_entries[i].filename, filename) == 0) {
-            strncpy(info->name, fat32_entries[i].filename, VFS_MAX_NAME - 1);
-            info->name[VFS_MAX_NAME - 1] = '\0';
-            info->type = (fat32_entries[i].attributes & FAT32_ATTR_DIRECTORY) ? 
-                         VFS_TYPE_DIRECTORY : VFS_TYPE_FILE;
-            info->size = fat32_entries[i].size;
-            return VFS_SUCCESS;
-        }
-    }
-    
-    return VFS_NOT_FOUND;
+    return VFS_SUCCESS;
 }
 
 // Global FAT32 VFS operations structure

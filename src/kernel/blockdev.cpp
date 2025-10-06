@@ -85,9 +85,19 @@ int blockdev_write(uint8_t device, uint32_t sector, uint8_t count, const void* b
     
     blockdev_info_t* dev = &devices[device];
     
+    if (sector >= dev->sector_count || (uint32_t)count > dev->sector_count ||
+        sector + count > dev->sector_count) {
+        error("[BLOCKDEV] Write sector %u count %u out of range (max: %u)",
+              sector, count, dev->sector_count);
+        return BLOCKDEV_ERROR;
+    }
+
     switch (dev->type) {
         case BLOCKDEV_TYPE_IDE:
-            return ide_write_sectors(dev->device_id, sector, count, (uint16_t*)buffer);
+            if (ide_write_sectors(dev->device_id, sector, count, (uint16_t*)buffer) != 0) {
+                return BLOCKDEV_ERROR;
+            }
+            return BLOCKDEV_SUCCESS;
         
         default:
             return BLOCKDEV_ERROR;

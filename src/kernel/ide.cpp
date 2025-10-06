@@ -3,6 +3,7 @@
 #include "kernel/debug.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 
 static ide_drive_t drives[IDE_MAX_DRIVES];
 static uint8_t drive_count = 0;
@@ -14,7 +15,7 @@ static void ide_delay(uint16_t base_port) {
     }
 }
 
-static int ide_wait_ready(uint16_t base_port) {
+static int ide_wait_ready(uint16_t base_port, bool quiet) {
     uint8_t status;
     int timeout = 1000000;
     
@@ -24,15 +25,23 @@ static int ide_wait_ready(uint16_t base_port) {
             return 0;
         }
         if (status & IDE_STATUS_ERR) {
-            error("[IDE] Error status: 0x%x", status);
+            if (!quiet) {
+                error("[IDE] Error status: 0x%x", status);
+            } else {
+                debug("[IDE] Error status while probing: 0x%x", status);
+            }
             return -1;
         }
     }
-    error("[IDE] Timeout waiting for ready");
+    if (!quiet) {
+        error("[IDE] Timeout waiting for ready");
+    } else {
+        debug("[IDE] Timeout waiting for ready on port 0x%x", base_port);
+    }
     return -1;
 }
 
-static int ide_wait_drq(uint16_t base_port) {
+static int ide_wait_drq(uint16_t base_port, bool quiet) {
     uint8_t status;
     int timeout = 1000000;
     
@@ -42,11 +51,19 @@ static int ide_wait_drq(uint16_t base_port) {
             return 0;
         }
         if (status & IDE_STATUS_ERR) {
-            error("[IDE] Error status during DRQ wait: 0x%x", status);
+            if (!quiet) {
+                error("[IDE] Error status during DRQ wait: 0x%x", status);
+            } else {
+                debug("[IDE] Error status during DRQ wait while probing: 0x%x", status);
+            }
             return -1;
         }
     }
-    error("[IDE] Timeout waiting for DRQ");
+    if (!quiet) {
+        error("[IDE] Timeout waiting for DRQ");
+    } else {
+        debug("[IDE] Timeout waiting for DRQ on port 0x%x", base_port);
+    }
     return -1;
 }
 
@@ -67,7 +84,7 @@ int ide_identify(uint8_t drive_id, uint16_t* buffer) {
     
     ide_select_drive(base_port, drive_num);
     
-    if (ide_wait_ready(base_port) != 0) {
+    if (ide_wait_ready(base_port, true) != 0) {
         return -1;
     }
     
@@ -81,7 +98,7 @@ int ide_identify(uint8_t drive_id, uint16_t* buffer) {
         return -1; // No drive
     }
     
-    if (ide_wait_drq(base_port) != 0) {
+    if (ide_wait_drq(base_port, true) != 0) {
         return -1;
     }
     
@@ -99,7 +116,7 @@ int ide_read_sectors(uint8_t drive_id, uint32_t lba, uint8_t count, uint16_t* bu
         return -1;
     }
     
-    if (count == 0 || count > 256) {
+    if (count == 0) {
         error("[IDE] Invalid sector count: %d", count);
         return -1;
     }
@@ -112,7 +129,7 @@ int ide_read_sectors(uint8_t drive_id, uint32_t lba, uint8_t count, uint16_t* bu
     
     ide_select_drive(base_port, drive_num);
     
-    if (ide_wait_ready(base_port) != 0) {
+    if (ide_wait_ready(base_port, false) != 0) {
         return -1;
     }
     
@@ -132,7 +149,7 @@ int ide_read_sectors(uint8_t drive_id, uint32_t lba, uint8_t count, uint16_t* bu
     
     // Read each sector
     for (int sector = 0; sector < count; sector++) {
-        if (ide_wait_drq(base_port) != 0) {
+        if (ide_wait_drq(base_port, false) != 0) {
             error("[IDE] Failed to read sector %d", sector);
             return -1;
         }
@@ -148,9 +165,56 @@ int ide_read_sectors(uint8_t drive_id, uint32_t lba, uint8_t count, uint16_t* bu
 }
 
 int ide_write_sectors(uint8_t drive_id, uint32_t lba, uint8_t count, uint16_t* buffer) {
-    // Write functionality - to be implemented later
-    error("[IDE] Write functionality not yet implemented");
-    return -1;
+    if (drive_id >= IDE_MAX_DRIVES || !drives[drive_id].exists) {
+        error("[IDE] Invalid drive: %d", drive_id);
+        return -1;
+    }
+
+    if (count == 0) {
+        error("[IDE] Invalid sector count: %d", count);
+        return -1;
+    }
+
+    ide_drive_t* drive = &drives[drive_id];
+    uint16_t base_port = drive->base_port;
+    uint8_t drive_num = drive->drive_num;
+
+    debug("[IDE] Writing %d sectors to LBA %u on drive %d", count, lba, drive_id);
+
+    ide_select_drive(base_port, drive_num);
+
+    if (ide_wait_ready(base_port, false) != 0) {
+        return -1;
+    }
+
+    outb(base_port + IDE_REG_FEATURES, 0x00);
+    outb(base_port + IDE_REG_SECTOR_COUNT, count);
+    outb(base_port + IDE_REG_LBA_LOW, lba & 0xFF);
+    outb(base_port + IDE_REG_LBA_MID, (lba >> 8) & 0xFF);
+    outb(base_port + IDE_REG_LBA_HIGH, (lba >> 16) & 0xFF);
+
+    uint8_t drive_select = 0xE0 | ((drive_num & 1) << 4) | ((lba >> 24) & 0x0F);
+    outb(base_port + IDE_REG_DRIVE, drive_select);
+
+    outb(base_port + IDE_REG_COMMAND, IDE_CMD_WRITE_SECTORS);
+
+    for (int sector = 0; sector < count; sector++) {
+        if (ide_wait_drq(base_port, false) != 0) {
+            error("[IDE] Failed to get DRQ for write sector %d", sector);
+            return -1;
+        }
+
+        for (int i = 0; i < 256; i++) {
+            outw(base_port + IDE_REG_DATA, buffer[sector * 256 + i]);
+        }
+    }
+
+    if (ide_wait_ready(base_port, false) != 0) {
+        return -1;
+    }
+
+    success("[IDE] Successfully wrote %d sectors", count);
+    return 0;
 }
 
 static int ide_detect_drive(uint16_t base_port, uint8_t drive_num) {

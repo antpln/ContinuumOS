@@ -5,6 +5,11 @@ void outb(uint16_t port, uint8_t value) {
     asm volatile("outb %1, %0" :: "dN"(port), "a"(value));
 }
 
+// Output a word (2 bytes) to a specified port
+void outw(uint16_t port, uint16_t value) {
+    asm volatile("outw %1, %0" :: "dN"(port), "a"(value));
+}
+
 // Input a byte from a specified port
 uint8_t inb(uint16_t port) {
     uint8_t ret;

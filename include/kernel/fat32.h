@@ -21,7 +21,7 @@
 #define FAT32_ATTR_LONG_NAME 0x0F
 
 // Maximum values
-#define FAT32_MAX_FILENAME   11
+#define FAT32_MAX_FILENAME   12
 #define FAT32_MAX_PATH       256
 #define FAT32_MAX_OPEN_FILES 16
 
@@ -94,6 +94,10 @@ typedef struct {
     uint32_t file_size;
     uint32_t position;
     uint32_t cluster_position;
+    uint32_t last_cluster;       // Last cluster in the chain (for appends)
+    uint32_t dir_cluster;        // Directory containing this file's entry
+    uint32_t dir_entry_cluster;  // Cluster where the directory entry resides
+    uint32_t dir_entry_index;    // Index within the directory cluster
     uint8_t in_use;
 } fat32_file_t;
 
@@ -110,12 +114,20 @@ int fat32_mount(uint8_t device_id);
 int fat32_unmount(void);
 int fat32_open(const char* path);
 int fat32_read(int fd, void* buffer, size_t size);
+int fat32_write(int fd, const void* buffer, size_t size);
 int fat32_seek(int fd, uint32_t position);
 void fat32_close(int fd);
 int fat32_list_directory(uint32_t dir_cluster, fat32_file_info_t* files, int max_files);
 uint32_t fat32_find_file(uint32_t dir_cluster, const char* filename);
 uint32_t fat32_find_file_by_path(const char* path);
-uint32_t fat32_resolve_path(const char* path, char* filename);
+int fat32_lookup_path(const char* path, fat32_file_info_t* info,
+                      uint32_t* parent_dir_cluster,
+                      uint32_t* entry_cluster,
+                      uint32_t* entry_index);
+int fat32_create(const char* path);
+int fat32_remove(const char* path);
+int fat32_mkdir_path(const char* path);
+int fat32_rmdir_path(const char* path);
 int fat32_get_fs_info(void);
 uint32_t fat32_get_root_cluster(void);
 

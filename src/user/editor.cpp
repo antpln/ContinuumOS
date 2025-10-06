@@ -3,6 +3,7 @@
 #include <string.h>
 #include <kernel/heap.h>
 #include <kernel/vga.h>
+#include <kernel/vfs.h>
 #include <kernel/scheduler.h>
 #include <kernel/process.h>
 #include <kernel/keyboard.h>
@@ -26,17 +27,15 @@ extern Terminal terminal;
 static Editor editor_instance;
 
 // Static copies of parameters set before process start
-static char s_filename[64];
-static FSNode* s_dir = nullptr;
+static char s_path[VFS_MAX_PATH];
 
-extern "C" void editor_set_params(const char* filename, FSNode* dir) {
-    if (filename) {
-        strncpy(s_filename, filename, sizeof(s_filename) - 1);
-        s_filename[sizeof(s_filename) - 1] = '\0';
+extern "C" void editor_set_params(const char* path) {
+    if (path) {
+        strncpy(s_path, path, sizeof(s_path) - 1);
+        s_path[sizeof(s_path) - 1] = '\0';
     } else {
-        s_filename[0] = '\0';
+        s_path[0] = '\0';
     }
-    s_dir = dir;
 }
 
 // Copy a line with null-termination
@@ -46,38 +45,80 @@ static inline void copy_line(char* dst, const char* src) {
 }
 
 // Start editing a file
-void Editor::start(const char* filename, FSNode* current_dir) {
+void Editor::start(const char* path) {
     active = true;
     status_message[0] = '\0';
 
-    this->current_dir = current_dir;
-    strncpy(this->filename, filename, sizeof(this->filename) - 1);
+    if (path) {
+        strncpy(this->path, path, sizeof(this->path) - 1);
+        this->path[sizeof(this->path) - 1] = '\0';
+    } else {
+        this->path[0] = '\0';
+    }
+
+    const char* last_slash = strrchr(this->path, '/');
+    if (last_slash && *(last_slash + 1)) {
+        strncpy(this->filename, last_slash + 1, sizeof(this->filename) - 1);
+    } else if (this->path[0]) {
+        strncpy(this->filename, this->path, sizeof(this->filename) - 1);
+    } else {
+        strncpy(this->filename, "untitled", sizeof(this->filename) - 1);
+    }
     this->filename[sizeof(this->filename) - 1] = '\0';
 
-    FSNode* file = fs_find_child(current_dir, this->filename);
-    if (file && file->type == FS_FILE && file->data && file->size > 0) {
-        size_t size = file->size;
-        uint8_t* data = file->data;
-        int lines = 0;
-        size_t pos = 0;
+    line_count = 0;
+    bool truncated = false;
 
-        while (pos < size && lines < EDITOR_MAX_LINES) {
-            size_t start = pos;
-            while (pos < size && data[pos] != '\n') pos++;
-            size_t len = pos - start;
-            if (len >= EDITOR_LINE_LENGTH) len = EDITOR_LINE_LENGTH - 1;
-            memcpy(buffer[lines], data + start, len);
-            buffer[lines][len] = '\0';
-            lines++; pos++;
+    if (this->path[0]) {
+        vfs_file_t file;
+        if (vfs_open(this->path, &file) == VFS_SUCCESS) {
+            char read_buf[128];
+            char line_buf[EDITOR_LINE_LENGTH];
+            int line_len = 0;
+            int bytes = 0;
+
+            while ((bytes = vfs_read(&file, read_buf, sizeof(read_buf))) > 0) {
+                for (int i = 0; i < bytes; ++i) {
+                    char c = read_buf[i];
+                    if (c == '\r') {
+                        continue;
+                    }
+                    if (c == '\n') {
+                        line_buf[line_len] = '\0';
+                        if (line_count < EDITOR_MAX_LINES) {
+                            copy_line(buffer[line_count++], line_buf);
+                        } else {
+                            truncated = true;
+                        }
+                        line_len = 0;
+                    } else {
+                        if (line_len < EDITOR_LINE_LENGTH - 1) {
+                            line_buf[line_len++] = c;
+                        }
+                    }
+                }
+            }
+
+            if (line_len > 0 || line_count == 0) {
+                line_buf[line_len] = '\0';
+                if (line_count < EDITOR_MAX_LINES) {
+                    copy_line(buffer[line_count++], line_buf);
+                } else {
+                    truncated = true;
+                }
+            }
+
+            vfs_close(&file);
         }
-        if (lines == 0) {
-            buffer[0][0] = '\0';
-            lines = 1;
-        }
-        line_count = lines;
-    } else {
-        line_count = 1;
+    }
+
+    if (line_count == 0) {
         buffer[0][0] = '\0';
+        line_count = 1;
+    }
+
+    if (truncated) {
+        set_status_message("File truncated in editor view");
     }
 
     cursor_line = 0;
@@ -96,43 +137,86 @@ bool Editor::is_active() {
 void Editor::exit(bool save) {
     printf("\n");
     if (save) {
-        if (!current_dir) {
-            printf("Error: no directory to save in.\n");
+        if (!path[0]) {
+            printf("Error: no path to save.\n");
+            active = false;
             return;
         }
-        FSNode* file = fs_find_child(current_dir, filename);
-        if (!file) {
-            file = fs_create_node(filename, FS_FILE);
-            if (file) fs_add_child(current_dir, file);
-        }
-        if (file && file->type == FS_FILE) {
-            while (line_count > 1 && strlen(buffer[line_count - 1]) == 0) {
-                --line_count;
-            }
-            size_t total = 0;
-            for (int i = 0; i < line_count; ++i)
-                total += strlen(buffer[i]) + 1;
 
-            if (file->data) kfree(file->data);
-            uint8_t* data = static_cast<uint8_t*>(kmalloc(total + 1));
-            if (!data) {
-                printf("Memory allocation failed.\n");
+        while (line_count > 1 && strlen(buffer[line_count - 1]) == 0) {
+            --line_count;
+        }
+
+        size_t total = 0;
+        for (int i = 0; i < line_count; ++i) {
+            total += strlen(buffer[i]) + 1; // include newline
+        }
+
+        char* data = nullptr;
+        if (total > 0) {
+            data = (char*)kmalloc(total);
+        }
+        if (total > 0 && !data) {
+            printf("Memory allocation failed.\n");
+            active = false;
+            return;
+        }
+
+        size_t pos = 0;
+        for (int i = 0; i < line_count; ++i) {
+            size_t len = strlen(buffer[i]);
+            if (data && len) {
+                memcpy(data + pos, buffer[i], len);
+            }
+            pos += len;
+            if (data) {
+                data[pos] = '\n';
+            }
+            pos += 1;
+        }
+
+        int remove_res = vfs_remove(path);
+        if (remove_res != VFS_SUCCESS && remove_res != VFS_NOT_FOUND) {
+            printf("Error: could not prepare file '%s'.\n", path);
+            if (data) kfree(data);
+            active = false;
+            return;
+        }
+
+        if (vfs_create(path) != VFS_SUCCESS) {
+            // File may already exist; that's fine
+        }
+
+        vfs_file_t file;
+        if (vfs_open(path, &file) != VFS_SUCCESS) {
+            printf("Error: could not open file '%s'.\n", path);
+            if (data) kfree(data);
+            active = false;
+            return;
+        }
+
+        if (vfs_seek(&file, 0) != VFS_SUCCESS) {
+            printf("Error: could not seek file '%s'.\n", path);
+            vfs_close(&file);
+            if (data) kfree(data);
+            active = false;
+            return;
+        }
+
+        if (total > 0 && data) {
+            int written = vfs_write(&file, data, total);
+            if (written < 0 || (size_t)written != total) {
+                printf("Error: failed to write file '%s'.\n", path);
+                vfs_close(&file);
+                if (data) kfree(data);
+                active = false;
                 return;
             }
-            file->data = data;
-            size_t pos = 0;
-            for (int i = 0; i < line_count; ++i) {
-                size_t len = strlen(buffer[i]);
-                memcpy(data + pos, buffer[i], len);
-                pos += len;
-                data[pos++] = '\n';
-            }
-            data[pos] = '\0';
-            file->size = pos;
-            printf("File '%s' saved.\n", filename);
-        } else {
-            printf("Error: could not create or write file '%s'.\n", filename);
         }
+
+        vfs_close(&file);
+        if (data) kfree(data);
+        printf("File '%s' saved.\n", path);
     } else {
         printf("Edit aborted.\n");
     }
@@ -401,8 +485,8 @@ void Editor::handle_key(keyboard_event ke) {
 }
 
 // Editor interface functions
-void editor_start(const char* filename, FSNode* current_dir) {
-    editor_instance.start(filename, current_dir);
+void editor_start(const char* path) {
+    editor_instance.start(path);
 }
 bool editor_is_active() {
     return editor_instance.is_active();
@@ -419,8 +503,9 @@ extern "C" void editor_entry() {
     }
 
     // Use the safe copied params
-    printf("[editor] starting file '%s'\n", s_filename[0] ? s_filename : "untitled");
-    editor_start(s_filename[0] ? s_filename : (const char*)"untitled", s_dir);
+    const char* target = s_path[0] ? s_path : "/untitled";
+    printf("[editor] starting file '%s'\n", target);
+    editor_start(target);
     IOEvent io_event;
     while (editor_is_active()) {
         if (!process_poll_event(&io_event)) {

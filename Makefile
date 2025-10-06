@@ -48,7 +48,7 @@ KERNEL_ELF = kernel/kernel.bin
 QEMU = qemu-system-i386
 QEMU_FLAGS = -kernel $(KERNEL_ELF)
 
-.PHONY: all clean run directories iso debug runiso
+.PHONY: all clean run directories iso debug runiso release runrelease
 
 all: directories $(KERNEL_ELF)
 
@@ -96,6 +96,14 @@ iso: $(KERNEL_ELF)
 	cp grub.cfg isodir/boot/grub/grub.cfg
 	grub-mkrescue -o kernel.iso isodir
 
+# Build ISO with debug/test logging disabled for release workflows
+release:
+	$(MAKE) iso EXTRA_CFLAGS="-UDEBUG -UTEST"
+
+# Run the release build in QEMU
+runrelease: release test_fat32.img
+	$(QEMU) $(QEMU_FLAGS) -hda test_fat32.img
+
 run: $(KERNEL_ELF)
 	$(QEMU) $(QEMU_FLAGS) -hda test_fat32.img
 
@@ -116,12 +124,17 @@ clean:
 	rm -f $(KERNEL_DEST)/kernel2.bin
 clean-all: clean
 	rm -f test_fat32.img
+	rm -f fat32_template.img
 
 # Create test FAT32 disk image
 test_fat32.img: fat32_template.img
 	@echo "Creating test FAT32 disk image from template..."
 	cp fat32_template.img test_fat32.img
 	@echo "Test FAT32 disk image created successfully"
+
+fat32_template.img:
+	@echo "Template image missing; rebuilding..."
+	./scripts/build_fat32_template.sh $@
 
 # Add debug target
 debug:
