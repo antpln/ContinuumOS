@@ -1,108 +1,28 @@
-name: build‑and‑release
-      # 2 – Host deps
-      - na      # 4 – Cache toolchain
-      - name: Cache           make install-gcc
-          make i      # 8 – Build ISO
-      - name: Build release ISO
-        run: |
-          if [ "${{ steps.prebuilt.outputs.found }}" = "true" ]; then
-            make clean && CC=i686-linux-gnu-gcc CXX=i686-linux-gnu-g++ AS=i686-linux-gnu-as LD=i686-linux-gnu-ld make release
-          else
-            make clean && make release
-          fi
-        working-directory: ${{ github.workspace }}
+name: build-and-release
 
-      - name: Build FAT32 test image
-        run: make test_fat32.img
-        working-directory: ${{ github.workspace }}
-
-      # 9 – Diagnostic: Show working directory and libc/include contentsget-libgcc
-
-      # 6 – Expose toolchain to PATH
-      - name: Add cross‑compiler to PATH
-        if: steps.prebuilt.outputs.found != 'true'
-        run: echo "$PWD/opt/cross/bin" >> "$GITHUB_PATH"
-
-      # 7 – Set up Makefile target variable based on which toolchain we have
-      - name: Configure build for toolchain
-        run: |
-          if [ "${{ steps.prebuilt.outputs.found }}" = "true" ]; then
-            # Use the pre-built toolchain prefix
-            echo "CROSS_COMPILE=i686-linux-gnu-" >> "$GITHUB_ENV"
-            echo "Using pre-built toolchain: i686-linux-gnu-"
-          else
-            # Use the custom-built toolchain
-            echo "CROSS_COMPILE=${{ env.TARGET }}-" >> "$GITHUB_ENV"
-            echo "Using custom toolchain: ${{ env.TARGET }}-"
-          fi
-
-      - name: Verify toolchain
-        run: |
-          if [ "${{ steps.prebuilt.outputs.found }}" = "true" ]; then
-            i686-linux-gnu-gcc --version
-            i686-linux-gnu-ld  --version
-          else
-            ${{ env.TARGET }}-gcc --version
-            ${{ env.TARGET }}-ld  --version
-          fi
-
-      # 8 – Build ISOr
-        id: cache-cross
-        if: steps.prebuilt.outputs.found != 'true'
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/opt/cross
-          key: ${{ runner.os }}-gcc-${{ env.GCC_VERSION }}-${{ env.TARGET }}
-
-      # 5 – Build toolchain (only if no prebuilt and cache miss)
-      - name: Build ${{ env.TARGET }} GCC ${{ env.GCC_VERSION }}
-        if: steps.prebuilt.outputs.found != 'true' && steps.cache-cross.outputs.cache-hit != 'true' host packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo \
-            grub-pc-bin xorriso mtools
-
-      # 3 – Try to install pre-built cross-compiler from package manager
-      - name: Try installing pre-built cross-compiler
-        id: prebuilt
-        continue-on-error: true
-        run: |
-          # Try installing from Ubuntu repositories
-          sudo apt-get install -y gcc-i686-linux-gnu g++-i686-linux-gnu binutils-i686-linux-gnu || true
-          
-          # Check if we got a working toolchain
-          if command -v i686-linux-gnu-gcc &> /dev/null; then
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            echo "prefix=i686-linux-gnu" >> "$GITHUB_OUTPUT"
-            echo "✓ Found pre-built i686-linux-gnu toolchain"
-          else
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "✗ No pre-built toolchain available, will build from source"
-          fi
-
-      # 4 – Cache toolchainsh:
-    branches: [ "main" ]     # every push to main => build + release
+on:
+  push:
+    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]     # still build on PRs, but no release
+    branches: [ "main" ]
   workflow_dispatch:
 
 env:
   TARGET: i686-elf
   GCC_VERSION: "13.2.0"
+
 permissions:
-  contents: write   # allow creating tags & releases
-  # (optional) If other steps need different scopes, list them here.
-  
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      # 1 – Source
+      # 1 – Checkout source
       - uses: actions/checkout@v4
 
-      # 2 – Host deps
+      # 2 – Install host dependencies
       - name: Install host packages
         run: |
           sudo apt-get update
@@ -110,26 +30,55 @@ jobs:
             build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo \
             grub-pc-bin xorriso mtools
 
-      # 3 – Cache toolchain
-      - name: Cache cross‑compiler
+      # 3 – Try to download pre-built i686-elf cross-compiler
+      - name: Try pre-built i686-elf toolchain
+        id: prebuilt
+        continue-on-error: true
+        run: |
+          echo "Attempting to download pre-built i686-elf toolchain..."
+          
+          # Try downloading from lordmilko's releases (pre-built i686-elf toolchain)
+          if wget -q https://github.com/lordmilko/i686-elf-tools/releases/download/13.1.0/i686-elf-tools-linux.zip -O /tmp/toolchain.zip; then
+            sudo apt-get install -y unzip
+            unzip -q /tmp/toolchain.zip -d /tmp/toolchain
+            mkdir -p ${{ github.workspace }}/opt/cross
+            if [ -d /tmp/toolchain/i686-elf-tools-linux ]; then
+              cp -r /tmp/toolchain/i686-elf-tools-linux/* ${{ github.workspace }}/opt/cross/
+              export PATH="${{ github.workspace }}/opt/cross/bin:$PATH"
+              if command -v i686-elf-gcc &> /dev/null; then
+                echo "found=true" >> "$GITHUB_OUTPUT"
+                i686-elf-gcc --version
+                echo "✓ Using pre-built i686-elf toolchain"
+                exit 0
+              fi
+            fi
+          fi
+          
+          echo "found=false" >> "$GITHUB_OUTPUT"
+          echo "✗ Pre-built toolchain not available, will build from source"
+
+      # 4 – Cache custom toolchain (only needed if building from source)
+      - name: Cache cross-compiler
         id: cache-cross
+        if: steps.prebuilt.outputs.found != 'true'
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/opt/cross
           key: ${{ runner.os }}-gcc-${{ env.GCC_VERSION }}-${{ env.TARGET }}
 
-      # 4 – Build toolchain (only if cache miss)
+      # 5 – Build custom toolchain from source (only if no prebuilt and cache miss)
       - name: Build ${{ env.TARGET }} GCC ${{ env.GCC_VERSION }}
-        if: steps.cache-cross.outputs.cache-hit != 'true'
+        if: steps.prebuilt.outputs.found != 'true' && steps.cache-cross.outputs.cache-hit != 'true'
         run: |
           set -e
+          echo "Building cross-compiler from source (this will take ~15 minutes)..."
           prefix="$PWD/opt/cross"
           mkdir -p "$prefix"
           src="$PWD/src"
           mkdir -p "$src"
           cd "$src"
 
-          # Binutils -----------------------------------------------------------
+          # Binutils
           wget -q https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.xz
           tar -xf binutils-2.42.tar.xz
           mkdir -p build-binutils && cd build-binutils
@@ -139,7 +88,7 @@ jobs:
           make install
           cd ..
 
-          # GCC ---------------------------------------------------------------
+          # GCC
           wget -q https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.xz
           tar -xf gcc-${GCC_VERSION}.tar.xz
           mkdir -p build-gcc && cd build-gcc
@@ -150,16 +99,18 @@ jobs:
           make install-gcc
           make install-target-libgcc
 
-      # 5 – Expose toolchain
-      - name: Add cross‑compiler to PATH
+      # 6 – Add toolchain to PATH
+      - name: Add cross-compiler to PATH
         run: echo "$PWD/opt/cross/bin" >> "$GITHUB_PATH"
 
+      # 7 – Verify toolchain
       - name: Verify toolchain
         run: |
-          ${{ env.TARGET }}-gcc --version
-          ${{ env.TARGET }}-ld  --version
+          echo "Verifying i686-elf toolchain:"
+          i686-elf-gcc --version
+          i686-elf-ld --version
 
-      # 6 – Build ISO
+      # 8 – Build kernel
       - name: Build release ISO
         run: make clean && make release
         working-directory: ${{ github.workspace }}
@@ -168,62 +119,29 @@ jobs:
         run: make test_fat32.img
         working-directory: ${{ github.workspace }}
 
-            # 9 – Diagnostic: Show working directory and libc/include contents
-      - name: Show working directory and libc/include contents
-        run: |
-          pwd
-          ls -l libc/include
-          ls -l libc/include/stdlib.h
-
-      # 10 – Prepare build directories
-      - name: Prepare build directories
-        run: |
-          mkdir -p build
-          mkdir -p build/kernel
-          mkdir -p build/boot
-          mkdir -p build/libc
-          mkdir -p build/libc/stdlib
-
-      # 11 – Rename ISO
+      # 9 – Package ISO
       - name: Rename ISO
         run: mv kernel.iso continuumos.iso
 
-      # 12 – Upload artifact (useful for PRs / debugging)
+      # 10 – Upload artifact
       - uses: actions/upload-artifact@v4
         with:
           name: continuumos.iso
           path: continuumos.iso
 
-      # 13 – Capture short commit hash
+      # 11 – Create release tag
       - name: Capture short SHA
         id: vars
         run: echo "shortsha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      # 14 – Create / update GitHub Release and attach ISO
-
-      # 7 – Package ISO with a predictable name
-      - name: Rename ISO
-        run: mv kernel.iso continuumos.iso
-
-      # 8 – Upload artifact (useful for PRs / debugging)
-      - uses: actions/upload-artifact@v4
-        with:
-          name: continuumos.iso
-          path: continuumos.iso
-
-      # 9 – Capture short commit hash
-      - name: Capture short SHA
-        id: vars
-        run: echo "shortsha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      # 10 – Create / update GitHub Release and attach ISO
+      # 12 – Publish release (only on push to main)
       - name: Publish Release with ISO
-        if: github.event_name == 'push'      # only for real pushes, not PRs
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.vars.outputs.shortsha }}               # full commit SHA as tag
-          name:     ${{ steps.vars.outputs.shortsha }}  # release title = short SHA
-          generate_release_notes: false            # turn on if you like
+          tag_name: ${{ steps.vars.outputs.shortsha }}
+          name: ${{ steps.vars.outputs.shortsha }}
+          generate_release_notes: false
           files: continuumos.iso
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
