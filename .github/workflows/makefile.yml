@@ -81,11 +81,11 @@ jobs:
 
       # 6 – Build ISO
       - name: Build release ISO
-        run: make release
+        run: make clean && make release
         working-directory: ${{ github.workspace }}
 
       - name: Build FAT32 test image
-        run: make test_fat32.img
+        run: make clean && make test_fat32.img
         working-directory: ${{ github.workspace }}
 
       # 5.4 – Diagnostic: Show working directory and libc/include contents
