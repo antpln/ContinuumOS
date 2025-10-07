@@ -119,21 +119,20 @@ Note: To rebuild the FAT32 template from scratch, you'll need `mtools` installed
 
 ## Shell Commands
 
-### File System Commands (RAMFS)
-- `ls` - List directory contents
+### File System Commands
+- `ls [path]` - List directory contents (works with all mounted filesystems)
 - `cd <dir>` - Change directory  
-- `cat <file>` - Display file contents
+- `cat <file>` - Display file contents (works with all mounted filesystems)
 - `touch <file>` - Create a new file
 - `mkdir <dir>` - Create a directory
 - `rm <file>` - Remove a file
 - `rmdir <dir>` - Remove a directory
 - `pwd` - Print working directory
 
-### FAT32 Commands
-- `mount` - Mount FAT32 filesystem from attached disk
+### Filesystem Management
+- `mount [type]` - Mount a filesystem (e.g., `mount fat32`)
+- `umount <mountpoint>` - Unmount a filesystem
 - `fsinfo` - Show mounted filesystem information
-- `fat32ls` - List FAT32 root directory
-- `fat32cat <file>` - Read and display FAT32 file contents
 
 ### System Commands
 - `help` - Show available commands

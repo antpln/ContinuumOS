@@ -637,42 +637,6 @@ void cmd_fat32_info(const char* args) {
     fat32_get_fs_info();
 }
 
-// List FAT32 root directory (legacy command - use ls /mnt/fat32 instead)
-void cmd_fat32_ls(const char* args) {
-    (void)args;
-    printf("Use 'ls /mnt/fat32' instead\n");
-}
-
-// Read and display FAT32 file (legacy command - use cat /mnt/fat32/filename instead)
-void cmd_fat32_cat(const char* args) {
-    if (!args || !*args) {
-        printf("Usage: fat32cator <filename>\n");
-        printf("Note: Use 'cat /mnt/fat32/<filename>' instead\n");
-        return;
-    }
-    
-    char path[VFS_MAX_PATH];
-    strcpy(path, "/mnt/fat32/");
-    strcat(path, args);
-    
-    printf("Reading FAT32 file via VFS: %s\n", path);
-    
-    vfs_file_t file;
-    if (vfs_open(path, &file) != VFS_SUCCESS) {
-        printf("Failed to open file: %s\n", args);
-        return;
-    }
-
-    char buffer[256];
-    int bytes;
-    while ((bytes = vfs_read(&file, buffer, sizeof(buffer) - 1)) > 0) {
-        buffer[bytes] = '\0';
-        printf("%s", buffer);
-    }
-    printf("\n");
-    vfs_close(&file);
-}
-
 // Print memory usage information
 void cmd_meminfo(const char* args) {
     (void)args;
@@ -703,8 +667,6 @@ shell_command_t commands[] = {
     { "mount",     cmd_mount,      "Mount filesystem" },
     { "umount",    cmd_umount,     "Unmount filesystem" },
     { "fsinfo",    cmd_fat32_info, "Show filesystem info" },
-    { "fat32ls",   cmd_fat32_ls,   "List FAT32 root directory (legacy)" },
-    { "fat32cat",  cmd_fat32_cat,  "Read and display FAT32 file (legacy)" },
     { "meminfo", cmd_meminfo, "Show memory usage info" },
     { NULL,        NULL,          NULL }
 };
