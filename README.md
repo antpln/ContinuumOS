@@ -141,6 +141,8 @@ Note: To rebuild the FAT32 template from scratch, you'll need `mtools` installed
 - `history` - Show command history
 - `edit <file>` - Edit a file (use `.save` to save, `.exit` to quit)
 - `ps` - List running processes (if implemented)
+- `meminfo` - Display detailed memory usage information (physical memory, heap statistics, memory layout)
+- `free` - Display memory usage summary in a Linux-style format
 
 ### Hardware Commands
 - `lsblk` - List block devices

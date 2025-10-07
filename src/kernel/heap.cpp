@@ -120,3 +120,37 @@ void* krealloc(void* ptr, size_t size) {
 
     return new_ptr;
 }
+
+// Get heap statistics
+void get_heap_stats(heap_stats_t* stats) {
+    if (!stats || !free_list) {
+        return;
+    }
+    
+    stats->total_size = KERNEL_HEAP_SIZE;
+    stats->used_size = 0;
+    stats->free_size = 0;
+    stats->allocated_blocks = 0;
+    stats->free_blocks = 0;
+    stats->largest_free_block = 0;
+    
+    heap_block_t* current = free_list;
+    while (current != NULL) {
+        if (current->free) {
+            stats->free_size += current->size;
+            stats->free_blocks++;
+            if (current->size > stats->largest_free_block) {
+                stats->largest_free_block = current->size;
+            }
+        } else {
+            stats->used_size += current->size;
+            stats->allocated_blocks++;
+        }
+        current = current->next;
+    }
+    
+    // Account for block headers
+    uint32_t total_blocks = stats->allocated_blocks + stats->free_blocks;
+    uint32_t header_overhead = total_blocks * sizeof(heap_block_t);
+    stats->overhead = header_overhead;
+}

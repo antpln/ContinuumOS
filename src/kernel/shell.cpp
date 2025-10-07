@@ -640,11 +640,72 @@ void cmd_fat32_info(const char* args) {
 // Print memory usage information
 void cmd_meminfo(const char* args) {
     (void)args;
-    uint32_t total = PhysicalMemoryManager::get_memory_size();
-    uint32_t free = PhysicalMemoryManager::get_free_frames() * PAGE_SIZE;
-    printf("Total memory: %u bytes\n", total);
-    printf("Free memory:  %u bytes\n", free);
-    printf("Used frames:  %u\n", PhysicalMemoryManager::used_frames);
+    
+    // Physical memory statistics
+    uint32_t total_mem = PhysicalMemoryManager::get_memory_size();
+    uint32_t free_frames = PhysicalMemoryManager::get_free_frames();
+    uint32_t used_frames = PhysicalMemoryManager::used_frames;
+    uint32_t free_mem = free_frames * PAGE_SIZE;
+    uint32_t used_mem = used_frames * PAGE_SIZE;
+    
+    // Heap statistics
+    heap_stats_t heap_stats;
+    get_heap_stats(&heap_stats);
+    
+    printf("\n=== Physical Memory Information ===\n");
+    printf("Total Memory:        %u bytes (%u MB)\n", total_mem, total_mem / (1024 * 1024));
+    printf("Used Memory:         %u bytes (%u MB)\n", used_mem, used_mem / (1024 * 1024));
+    printf("Free Memory:         %u bytes (%u MB)\n", free_mem, free_mem / (1024 * 1024));
+    printf("Total Frames:        %u frames\n", used_frames + free_frames);
+    printf("Used Frames:         %u frames\n", used_frames);
+    printf("Free Frames:         %u frames\n", free_frames);
+    printf("Frame Size:          %u bytes\n", PAGE_SIZE);
+    printf("Memory Usage:        %u%%\n", (used_mem * 100) / total_mem);
+    
+    printf("\n=== Kernel Heap Information ===\n");
+    printf("Heap Start:          0x%x\n", KERNEL_HEAP_START);
+    printf("Heap Size:           %u bytes (%u MB)\n", KERNEL_HEAP_SIZE, KERNEL_HEAP_SIZE / (1024 * 1024));
+    printf("Total Heap:          %u bytes\n", heap_stats.total_size);
+    printf("Used Heap:           %u bytes\n", heap_stats.used_size);
+    printf("Free Heap:           %u bytes\n", heap_stats.free_size);
+    printf("Metadata Overhead:   %u bytes\n", heap_stats.overhead);
+    printf("Allocated Blocks:    %u blocks\n", heap_stats.allocated_blocks);
+    printf("Free Blocks:         %u blocks\n", heap_stats.free_blocks);
+    printf("Largest Free Block:  %u bytes\n", heap_stats.largest_free_block);
+    printf("Heap Usage:          %u%%\n", 
+           heap_stats.total_size > 0 ? (heap_stats.used_size * 100) / heap_stats.total_size : 0);
+    
+    printf("\n=== Memory Layout ===\n");
+    printf("Kernel Heap:         0x%x - 0x%x\n", 
+           KERNEL_HEAP_START, KERNEL_HEAP_START + KERNEL_HEAP_SIZE);
+    printf("Page Size:           %u bytes\n", PAGE_SIZE);
+    
+    printf("\n");
+}
+
+// Print free memory (Linux-style free command)
+void cmd_free(const char* args) {
+    (void)args;
+    
+    // Physical memory statistics
+    uint32_t total_mem = PhysicalMemoryManager::get_memory_size();
+    uint32_t free_frames = PhysicalMemoryManager::get_free_frames();
+    uint32_t used_frames = PhysicalMemoryManager::used_frames;
+    uint32_t free_mem = free_frames * PAGE_SIZE;
+    uint32_t used_mem = used_frames * PAGE_SIZE;
+    
+    // Heap statistics
+    heap_stats_t heap_stats;
+    get_heap_stats(&heap_stats);
+    
+    // Display in a format similar to Linux 'free' command (without width specifiers)
+    printf("            total        used        free\n");
+    printf("Mem:   %u  %u  %u\n", total_mem, used_mem, free_mem);
+    printf("Heap:  %u  %u  %u\n", heap_stats.total_size, heap_stats.used_size, heap_stats.free_size);
+    printf("\n");
+    printf("Memory usage: %u%% (Physical), %u%% (Heap)\n",
+           (used_mem * 100) / total_mem,
+           heap_stats.total_size > 0 ? (heap_stats.used_size * 100) / heap_stats.total_size : 0);
 }
 
 // Command lookup table
@@ -667,7 +728,8 @@ shell_command_t commands[] = {
     { "mount",     cmd_mount,      "Mount filesystem" },
     { "umount",    cmd_umount,     "Unmount filesystem" },
     { "fsinfo",    cmd_fat32_info, "Show filesystem info" },
-    { "meminfo", cmd_meminfo, "Show memory usage info" },
+    { "meminfo",   cmd_meminfo,    "Show detailed memory usage" },
+    { "free",      cmd_free,       "Display memory usage summary" },
     { NULL,        NULL,          NULL }
 };
 

@@ -87,7 +87,6 @@ int printf(const char* format, ...) {
                 }
                 case 'x': { // Hexadecimal
                     unsigned int num = va_arg(args, unsigned int);
-                    terminal.writestring("0x");
                     itoa((int32_t)num, buffer, 16);
                     terminal.writestring(buffer);
                     break;
@@ -104,7 +103,6 @@ int printf(const char* format, ...) {
                 }
                 case 'p': { // Pointer
                     void* ptr = va_arg(args, void*);
-                    terminal.writestring("0x");
                     itoa((uintptr_t)ptr, buffer, 16);
                     terminal.writestring(buffer);
                     break;
@@ -150,7 +148,6 @@ int vprintf(const char* format, va_list args) {
                 }
                 case 'x': {
                     unsigned int num = va_arg(args, unsigned int);
-                    terminal.writestring("0x");
                     itoa((int32_t)num, buffer, 16);
                     terminal.writestring(buffer);
                     break;
@@ -167,7 +164,6 @@ int vprintf(const char* format, va_list args) {
                 }
                 case 'p': {
                     void* ptr = va_arg(args, void*);
-                    terminal.writestring("0x");
                     itoa((uintptr_t)ptr, buffer, 16);
                     terminal.writestring(buffer);
                     break;
