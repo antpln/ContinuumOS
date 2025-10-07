@@ -1,7 +1,87 @@
 name: build‑and‑release
+      # 2 – Host deps
+      - na      # 4 – Cache toolchain
+      - name: Cache           make install-gcc
+          make i      # 8 – Build ISO
+      - name: Build release ISO
+        run: |
+          if [ "${{ steps.prebuilt.outputs.found }}" = "true" ]; then
+            make clean && CC=i686-linux-gnu-gcc CXX=i686-linux-gnu-g++ AS=i686-linux-gnu-as LD=i686-linux-gnu-ld make release
+          else
+            make clean && make release
+          fi
+        working-directory: ${{ github.workspace }}
 
-on:
-  push:
+      - name: Build FAT32 test image
+        run: make test_fat32.img
+        working-directory: ${{ github.workspace }}
+
+      # 9 – Diagnostic: Show working directory and libc/include contentsget-libgcc
+
+      # 6 – Expose toolchain to PATH
+      - name: Add cross‑compiler to PATH
+        if: steps.prebuilt.outputs.found != 'true'
+        run: echo "$PWD/opt/cross/bin" >> "$GITHUB_PATH"
+
+      # 7 – Set up Makefile target variable based on which toolchain we have
+      - name: Configure build for toolchain
+        run: |
+          if [ "${{ steps.prebuilt.outputs.found }}" = "true" ]; then
+            # Use the pre-built toolchain prefix
+            echo "CROSS_COMPILE=i686-linux-gnu-" >> "$GITHUB_ENV"
+            echo "Using pre-built toolchain: i686-linux-gnu-"
+          else
+            # Use the custom-built toolchain
+            echo "CROSS_COMPILE=${{ env.TARGET }}-" >> "$GITHUB_ENV"
+            echo "Using custom toolchain: ${{ env.TARGET }}-"
+          fi
+
+      - name: Verify toolchain
+        run: |
+          if [ "${{ steps.prebuilt.outputs.found }}" = "true" ]; then
+            i686-linux-gnu-gcc --version
+            i686-linux-gnu-ld  --version
+          else
+            ${{ env.TARGET }}-gcc --version
+            ${{ env.TARGET }}-ld  --version
+          fi
+
+      # 8 – Build ISOr
+        id: cache-cross
+        if: steps.prebuilt.outputs.found != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/opt/cross
+          key: ${{ runner.os }}-gcc-${{ env.GCC_VERSION }}-${{ env.TARGET }}
+
+      # 5 – Build toolchain (only if no prebuilt and cache miss)
+      - name: Build ${{ env.TARGET }} GCC ${{ env.GCC_VERSION }}
+        if: steps.prebuilt.outputs.found != 'true' && steps.cache-cross.outputs.cache-hit != 'true' host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo \
+            grub-pc-bin xorriso mtools
+
+      # 3 – Try to install pre-built cross-compiler from package manager
+      - name: Try installing pre-built cross-compiler
+        id: prebuilt
+        continue-on-error: true
+        run: |
+          # Try installing from Ubuntu repositories
+          sudo apt-get install -y gcc-i686-linux-gnu g++-i686-linux-gnu binutils-i686-linux-gnu || true
+          
+          # Check if we got a working toolchain
+          if command -v i686-linux-gnu-gcc &> /dev/null; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "prefix=i686-linux-gnu" >> "$GITHUB_OUTPUT"
+            echo "✓ Found pre-built i686-linux-gnu toolchain"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "✗ No pre-built toolchain available, will build from source"
+          fi
+
+      # 4 – Cache toolchainsh:
     branches: [ "main" ]     # every push to main => build + release
   pull_request:
     branches: [ "main" ]     # still build on PRs, but no release
@@ -85,17 +165,17 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Build FAT32 test image
-        run: make clean && make test_fat32.img
+        run: make test_fat32.img
         working-directory: ${{ github.workspace }}
 
-      # 5.4 – Diagnostic: Show working directory and libc/include contents
+            # 9 – Diagnostic: Show working directory and libc/include contents
       - name: Show working directory and libc/include contents
         run: |
           pwd
           ls -l libc/include
           ls -l libc/include/stdlib.h
 
-      # 5.5 – Prepare build directories
+      # 10 – Prepare build directories
       - name: Prepare build directories
         run: |
           mkdir -p build
@@ -103,6 +183,23 @@ jobs:
           mkdir -p build/boot
           mkdir -p build/libc
           mkdir -p build/libc/stdlib
+
+      # 11 – Rename ISO
+      - name: Rename ISO
+        run: mv kernel.iso continuumos.iso
+
+      # 12 – Upload artifact (useful for PRs / debugging)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: continuumos.iso
+          path: continuumos.iso
+
+      # 13 – Capture short commit hash
+      - name: Capture short SHA
+        id: vars
+        run: echo "shortsha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # 14 – Create / update GitHub Release and attach ISO
 
       # 7 – Package ISO with a predictable name
       - name: Rename ISO
