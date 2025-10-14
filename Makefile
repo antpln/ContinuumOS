@@ -45,7 +45,7 @@ KERNEL_ELF = kernel/kernel.bin
 
 # QEMU configuration
 QEMU = qemu-system-i386
-QEMU_FLAGS = -kernel $(KERNEL_ELF)
+QEMU_FLAGS = -kernel $(KERNEL_ELF) -serial stdio
 
 .PHONY: all clean run directories iso debug runiso release runrelease
 

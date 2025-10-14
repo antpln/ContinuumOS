@@ -14,6 +14,7 @@
 #include "kernel/ramfs.h"
 #include "kernel/vfs.h"
 #include "kernel/debug.h"
+#include "kernel/serial.h"
 #include "kernel/tests/memtest.h"
 #include "kernel/tests/pagetest.h"
 #include "kernel/tests/heaptest.h"
@@ -48,7 +49,8 @@ extern "C"
 		(void)ascii_guitar;
 		(void)multiboot_info; // Suppress unused parameter warning
 
-		terminal.initialize();
+	terminal.initialize();
+	serial_init();
 
 		// Initialize the scheduler (round-robin)
 		scheduler_init();
