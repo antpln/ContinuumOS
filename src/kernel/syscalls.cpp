@@ -8,6 +8,7 @@
 #include "kernel/terminal_windows.h"
 #include "kernel/framebuffer.h"
 #include "kernel/serial.h"
+#include "kernel/pci.h"
 #include <sys/gui.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -190,6 +191,20 @@ static void sys_gui_command(const GuiCommand* user_command)
     gui::process_command(command, terminal, proc);
 }
 
+void sys_pci_register_listener(uint16_t vendor_id, uint16_t device_id) {
+    Process* proc = scheduler_current_process();
+    if (proc) {
+        pci_register_process_listener(proc, vendor_id, device_id);
+    }
+}
+
+void sys_pci_unregister_listener() {
+    Process* proc = scheduler_current_process();
+    if (proc) {
+        pci_unregister_process_listener(proc);
+    }
+}
+
 extern "C" void syscall_dispatch(registers_t* regs) {
     uint32_t syscall_num = regs->eax;
     uint32_t arg1 = regs->ebx;
@@ -223,6 +238,12 @@ extern "C" void syscall_dispatch(registers_t* regs) {
             break;
         case 0x87: // SYSCALL_CONSOLE_WRITE
             regs->eax = (uint32_t)sys_console_write((const char*)arg1, (size_t)arg2);
+            break;
+        case 0x88: // SYSCALL_PCI_REGISTER_LISTENER
+            sys_pci_register_listener((uint16_t)arg1, (uint16_t)arg2);
+            break;
+        case 0x89: // SYSCALL_PCI_UNREGISTER_LISTENER
+            sys_pci_unregister_listener();
             break;
         // ...other syscalls...
         default:

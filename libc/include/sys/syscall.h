@@ -16,6 +16,9 @@ extern "C" {
 #define SYSCALL_POLL_IO_EVENT 0x84
 #define SYSCALL_WAIT_IO_EVENT 0x85
 #define SYSCALL_GUI_COMMAND 0x86
+#define SYSCALL_CONSOLE_WRITE 0x87
+#define SYSCALL_PCI_REGISTER_LISTENER 0x88
+#define SYSCALL_PCI_UNREGISTER_LISTENER 0x89
 
 static inline void syscall_yield() {
     asm volatile ("int $0x80" : : "a"(SYSCALL_YIELD));
@@ -84,6 +87,24 @@ static inline void syscall_gui_command(const GuiCommand* command) {
         "int $0x80"
         :
         : "a"(SYSCALL_GUI_COMMAND), "b"(command)
+        : "memory"
+    );
+}
+
+static inline void syscall_pci_register_listener(uint16_t vendor_id, uint16_t device_id) {
+    asm volatile (
+        "int $0x80"
+        :
+        : "a"(SYSCALL_PCI_REGISTER_LISTENER), "b"(vendor_id), "c"(device_id)
+        : "memory"
+    );
+}
+
+static inline void syscall_pci_unregister_listener() {
+    asm volatile (
+        "int $0x80"
+        :
+        : "a"(SYSCALL_PCI_UNREGISTER_LISTENER)
         : "memory"
     );
 }

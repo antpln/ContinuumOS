@@ -172,15 +172,12 @@ void scheduler_resume_processes_for_event(HookType event_type, uint64_t event_va
     for (int i = 0; i < MAX_PROCESSES; ++i) {
         Process* proc = process_table[i];
         if (proc && process_has_matching_hook(proc, event_type, event_value)) {
-            debug("[SCHED] Resuming process %s (pid=%d) for event type=%d value=%u, hooks before=%d",
-                  proc->name ? proc->name : "?", proc->pid, (int)event_type, (unsigned)event_value, proc->hook_count);
             // Process is already alive, just remove the hooks so it becomes runnable
             int removed = 0;
             while (process_remove_hook(proc, event_type, event_value) == 0) {
                 // Remove all matching hooks in case multiple were registered
                 ++removed;
             }
-            debug("[SCHED] Removed %d hooks, hooks remaining=%d", removed, proc->hook_count);
         }
     }
 }
@@ -316,9 +313,7 @@ void scheduler_exit_current_and_switch(registers_t* regs) {
     if (!next) {
         PANIC("Failed to select next process after exit");
     }
-    
-    debug("[SCHED] Exiting process and switching to %s (pid=%d)\n", next->name, next->pid);
-    
+        
     // Set up the next context
     // Use volatile to prevent compiler optimization issues
     volatile CPUContext** ctx_ptr = (volatile CPUContext**)&g_next_context;

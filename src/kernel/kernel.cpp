@@ -27,6 +27,7 @@
 #include "kernel/framebuffer.h"
 #include "kernel/gui.h"
 #include "kernel/terminal_windows.h"
+#include "kernel/pci.h"
 
 #include "utils.h"
 #include <stdio.h> // Changed back to just stdio.h since include path is set in Makefile
@@ -115,6 +116,9 @@ extern "C"
 
 		// Initialize block devices (IDE, etc.)
 		blockdev_init();
+
+		// Initialize PCI subsystem
+		pci_init();
 
 		// Initialize FAT32 support
 		fat32_init();

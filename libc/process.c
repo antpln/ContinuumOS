@@ -23,3 +23,11 @@ void process_exit(int status) {
         asm volatile("hlt");
     }
 }
+
+void pci_register_listener(uint16_t vendor_id, uint16_t device_id) {
+    syscall_pci_register_listener(vendor_id, device_id);
+}
+
+void pci_unregister_listener() {
+    syscall_pci_unregister_listener();
+}

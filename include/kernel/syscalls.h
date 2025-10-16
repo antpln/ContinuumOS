@@ -13,6 +13,9 @@ char sys_getchar();
 void sys_yield();
 // Yield and wait for a specific event (hook)
 void sys_yield_for_event(int hook_type, uint64_t trigger_value);
+// PCI event registration
+void sys_pci_register_listener(uint16_t vendor_id, uint16_t device_id);
+void sys_pci_unregister_listener();
 
 #include "kernel/isr.h"
 

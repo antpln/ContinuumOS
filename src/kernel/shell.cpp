@@ -8,6 +8,7 @@
 #include <kernel/heap.h>
 #include <kernel/vga.h>      
 #include <kernel/shell.h>
+#include <kernel/pci.h>
 #include "editor_process.h"
 #include <kernel/process.h>
 #include <kernel/blockdev.h>
@@ -708,6 +709,12 @@ void cmd_free(const char* args) {
            heap_stats.total_size > 0 ? (heap_stats.used_size * 100) / heap_stats.total_size : 0);
 }
 
+// List PCI devices
+void cmd_lspci(const char* args) {
+    (void)args;
+    pci_list_devices();
+}
+
 // Command lookup table
 shell_command_t commands[] = {
     { "help",     cmd_help,     "Show available commands" },
@@ -730,6 +737,7 @@ shell_command_t commands[] = {
     { "fsinfo",    cmd_fat32_info, "Show filesystem info" },
     { "meminfo",   cmd_meminfo,    "Show detailed memory usage" },
     { "free",      cmd_free,       "Display memory usage summary" },
+    { "lspci",     cmd_lspci,      "List PCI devices" },
     { NULL,        NULL,          NULL }
 };
 
