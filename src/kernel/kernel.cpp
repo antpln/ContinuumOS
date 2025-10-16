@@ -8,6 +8,7 @@
 #include "kernel/heap.h"
 #include "kernel/pic.h"
 #include "kernel/keyboard.h"
+#include "kernel/mouse.h"
 #include "kernel/gdt.h"
 #include "kernel/timer.h"
 #include "kernel/shell.h"
@@ -22,6 +23,10 @@
 #include <kernel/process.h>
 #include "kernel/blockdev.h"
 #include "kernel/fat32.h"
+#include "kernel/multiboot.h"
+#include "kernel/framebuffer.h"
+#include "kernel/gui.h"
+#include "kernel/terminal_windows.h"
 
 #include "utils.h"
 #include <stdio.h> // Changed back to just stdio.h since include path is set in Makefile
@@ -34,10 +39,13 @@ extern "C"
 	void test_proc_entry();
 #endif
 
-	Terminal terminal;
+		Terminal terminal;
 
-	void kernel_main(uint32_t multiboot_info)
-	{
+		void kernel_main(uint32_t multiboot_info_ptr)
+		{
+			serial_init();
+			multiboot_info_t *mb_info = reinterpret_cast<multiboot_info_t *>(multiboot_info_ptr);
+			bool framebuffer_ready = framebuffer::initialize(mb_info);
 
 		const char *ascii_guitar = R"(
           Q
@@ -47,16 +55,19 @@ extern "C"
        ~H| |/
             ~)";
 		(void)ascii_guitar;
-		(void)multiboot_info; // Suppress unused parameter warning
-
-	terminal.initialize();
-	serial_init();
+		debug("ContinuumOS Kernel Starting...");
+		terminal.initialize();
+		if (!framebuffer_ready)
+		{
+			serial_write("[WARN] Framebuffer not available; using legacy text mode\n");
+			terminal.writeLine("[WARN] Framebuffer not available; using text mode");
+		}
 
 		// Initialize the scheduler (round-robin)
 		scheduler_init();
 
 		// Initialize the Physical Memory Manager (PMM) before paging
-		PhysicalMemoryManager::initialize(multiboot_info);
+		PhysicalMemoryManager::initialize(multiboot_info_ptr);
 
 		init_gdt(); // sets up GDT and flushes it
 
@@ -67,9 +78,37 @@ extern "C"
 		init_idt();
 		init_syscall_handler();
 
+		mouse_initialize();
+
+		uint32_t fb_phys = 0;
+		uint32_t fb_size = 0;
+		if (framebuffer_ready)
+		{
+			fb_phys = framebuffer::framebuffer_physical_address();
+			fb_size = framebuffer::framebuffer_size();
+		}
+
 		// Initialize virtual memory management
 		vmm_init();
+
+		if (framebuffer_ready && fb_phys != 0 && fb_size != 0)
+		{
+			uint32_t phys_aligned = fb_phys & ~(PAGE_SIZE - 1);
+			uint32_t offset = fb_phys - phys_aligned;
+			uint32_t map_size = fb_size + offset;
+			vmm_map_range(fb_phys - offset, phys_aligned, map_size, 1);
+		}
+
 		vmm_enable();
+
+		if (framebuffer_ready)
+		{
+			terminal.set_graphics_origin(48, 96);
+			terminal_windows::init(terminal, nullptr);
+			gui::draw_boot_screen();
+			gui::draw_workspace(terminal);
+			terminal.refresh();
+		}
 
 		// Set up heap
 		init_heap();
@@ -148,13 +187,22 @@ extern "C"
 #endif
 
 		// Create some built-in files or directories.
-		FSNode *root = fs_get_root();
+		fs_get_root();
 		keyboard_install();
 		// Initialize the PIT timer to 1000 Hz
 		init_timer(1000);
 
-		Process *shell_proc = k_start_process("shell", shell_entry, 0, 8192);
-		(void)shell_proc;
+		if (framebuffer_ready)
+		{
+			// In graphics mode, start the shell and give it a window.
+			// Other processes (like the editor) will run in the same context.
+			Process *shell_proc = k_start_process("shell", shell_entry, 0, 8192);
+			terminal_windows::request_new_window(terminal, shell_proc);
+			gui::draw_workspace(terminal);
+		} else {
+			// In text mode, just start the shell process.
+			k_start_process("shell", shell_entry, 0, 8192);
+		}
 
 		__asm__ volatile("sti");
 

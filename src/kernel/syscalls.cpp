@@ -3,6 +3,12 @@
 #include "kernel/keyboard.h"
 #include "kernel/process.h"
 #include "kernel/scheduler.h"
+#include "kernel/gui.h"
+#include "kernel/vga.h"
+#include "kernel/terminal_windows.h"
+#include "kernel/framebuffer.h"
+#include "kernel/serial.h"
+#include <sys/gui.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -29,6 +35,63 @@ int sys_write(int fd, const uint8_t* buffer, size_t size) {
 
 void sys_close(int fd) {
     fs_close(fd);
+}
+
+extern Terminal terminal;
+
+namespace
+{
+bool g_console_write_in_progress = false;
+
+class ConsoleWriteGuard
+{
+  public:
+    ConsoleWriteGuard()
+    {
+        g_console_write_in_progress = true;
+    }
+
+    ~ConsoleWriteGuard()
+    {
+        g_console_write_in_progress = false;
+    }
+};
+} // namespace
+
+size_t sys_console_write(const char* buffer, size_t size)
+{
+    if (buffer == nullptr || size == 0)
+    {
+        return 0;
+    }
+
+    if (g_console_write_in_progress)
+    {
+#ifdef DEBUG
+        serial_printf("[SYSCON] reentrant write fallback (len=%u)\n", static_cast<unsigned>(size));
+#endif
+        for (size_t i = 0; i < size; ++i)
+        {
+            serial_write_char(buffer[i]);
+        }
+        return size;
+    }
+
+    ConsoleWriteGuard guard;
+
+    Process* proc = scheduler_current_process();
+
+    if (!framebuffer::is_available() || proc == nullptr)
+    {
+        for (size_t i = 0; i < size; ++i)
+        {
+            terminal.putchar(buffer[i]);
+        }
+        return size;
+    }
+
+    terminal_windows::write_text(terminal, proc, buffer, size);
+    return size;
 }
 
 // Called from interrupt handler
@@ -110,7 +173,21 @@ static inline void sys_exit_with_regs(registers_t* regs) {
         register_keyboard_handler(proc, nullptr);
         kill_process(proc);
     }
-    scheduler_force_switch_with_regs(regs);
+    // Don't return through the dying process's stack frame
+    // Instead, directly switch to the next process
+    scheduler_exit_current_and_switch(regs);
+}
+
+static void sys_gui_command(const GuiCommand* user_command)
+{
+    if (user_command == nullptr)
+    {
+        return;
+    }
+
+    GuiCommand command = *user_command;
+    Process* proc = scheduler_current_process();
+    gui::process_command(command, terminal, proc);
 }
 
 extern "C" void syscall_dispatch(registers_t* regs) {
@@ -140,6 +217,12 @@ extern "C" void syscall_dispatch(registers_t* regs) {
             break;
         case 0x85: // SYSCALL_WAIT_IO_EVENT
             regs->eax = sys_wait_io_event(regs, (IOEvent*)arg1);
+            break;
+        case 0x86: // SYSCALL_GUI_COMMAND
+            sys_gui_command((const GuiCommand*)arg1);
+            break;
+        case 0x87: // SYSCALL_CONSOLE_WRITE
+            regs->eax = (uint32_t)sys_console_write((const char*)arg1, (size_t)arg2);
             break;
         // ...other syscalls...
         default:

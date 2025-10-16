@@ -521,9 +521,6 @@ extern "C" void editor_entry() {
         }
     }
     printf("[editor] exit loop\n");
-    if (proc) {
-        scheduler_restore_foreground(proc);
-    }
     process_exit(0);
     while (1) asm volatile("hlt");
 }

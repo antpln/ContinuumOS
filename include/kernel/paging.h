@@ -21,6 +21,7 @@ void vmm_enable();
  * But we show it for completeness.
  */
 void vmm_map(uint32_t virtual_addr, uint32_t physical_addr, int rw);
+void vmm_map_range(uint32_t virtual_addr, uint32_t physical_addr, uint32_t size, int rw);
 
 #ifdef __cplusplus
 }

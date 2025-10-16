@@ -6,6 +6,7 @@
 int sys_open(const char* path);
 int sys_read(int fd, uint8_t* buffer, size_t size);
 int sys_write(int fd, const uint8_t* buffer, size_t size);
+size_t sys_console_write(const char* buffer, size_t size);
 void sys_close(int fd);
 char sys_getchar();
 // Yield execution for current process

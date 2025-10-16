@@ -2,6 +2,10 @@
 #include "kernel/scheduler.h"
 #include "kernel/process.h"
 #include "kernel/debug.h"
+#include "kernel/terminal_windows.h"
+#include "kernel/vga.h"
+
+extern Terminal terminal;
 
 // Forward declarations for internal helpers
 static inline bool process_is_valid(Process* proc, const char* where);
@@ -31,7 +35,19 @@ int create_process(const char* name, void (*entry)(), int speculative) {
 
 void kill_process(Process* proc) {
     if (process_is_valid(proc, "kill")) {
+        // Unregister keyboard handler FIRST
+        // This ensures no more input is routed to the dying process
+        register_keyboard_handler(proc, nullptr);
+        
+        // Mark process as dead
+        // This prevents any focus events from being queued to it
         proc->alive = 0;
+
+        // Close the terminal window after marking as dead
+        terminal_windows::on_process_exit(proc, terminal);
+        
+        // Restore foreground (will skip sending events to dead process)
+        scheduler_restore_foreground(proc);
     }
 }
 

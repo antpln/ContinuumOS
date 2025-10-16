@@ -2,6 +2,7 @@
 #define LIBC_SYSCALL_H
 #include <stdint.h>
 #include <sys/events.h>
+#include <sys/gui.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,6 +15,7 @@ extern "C" {
 #define SYSCALL_EXIT 0x83
 #define SYSCALL_POLL_IO_EVENT 0x84
 #define SYSCALL_WAIT_IO_EVENT 0x85
+#define SYSCALL_GUI_COMMAND 0x86
 
 static inline void syscall_yield() {
     asm volatile ("int $0x80" : : "a"(SYSCALL_YIELD));
@@ -75,6 +77,15 @@ static inline int syscall_wait_io_event(IOEvent* event) {
         : "memory"
     );
     return ret;
+}
+
+static inline void syscall_gui_command(const GuiCommand* command) {
+    asm volatile (
+        "int $0x80"
+        :
+        : "a"(SYSCALL_GUI_COMMAND), "b"(command)
+        : "memory"
+    );
 }
 
 #ifdef __cplusplus

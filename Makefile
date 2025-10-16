@@ -16,10 +16,11 @@ LIBC_DIR = libc
 $(shell mkdir -p $(KERNEL_DEST))
 
 # Compiler flags
-CFLAGS = -O2 -g -std=gnu99 -ffreestanding -Wall -Wextra -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include -DDEBUG -DTEST
+COMMON_FLAGS = -O2 -g -ffreestanding -Wall -Wextra -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include -DDEBUG -DTEST
+CFLAGS = $(COMMON_FLAGS) -std=gnu99
 CFLAGS += $(EXTRA_CFLAGS)
-CXXFLAGS = -O2 -g -ffreestanding -Wall -Wextra -fno-exceptions -fno-rtti -I$(INCLUDE_DIR) -I$(LIBC_DIR)/include
-CXXFLAGS += $(CFLAGS)
+CXXFLAGS = $(COMMON_FLAGS) -fno-exceptions -fno-rtti
+CXXFLAGS += $(EXTRA_CFLAGS)
 LDFLAGS = -ffreestanding -O2 -nostdlib
 
 # Source files (exclude toolchain build directories)
@@ -93,6 +94,13 @@ iso: $(KERNEL_ELF)
 	mkdir -p isodir/boot/grub
 	cp $(KERNEL_DEST)/kernel.bin isodir/boot/kernel.bin
 	cp grub.cfg isodir/boot/grub/grub.cfg
+	@if [ -f /usr/share/grub/unicode.pf2 ]; then \
+		mkdir -p isodir/boot/grub/fonts; \
+		cp /usr/share/grub/unicode.pf2 isodir/boot/grub/fonts/unicode.pf2; \
+	elif [ -f /usr/share/grub/fonts/unicode.pf2 ]; then \
+		mkdir -p isodir/boot/grub/fonts; \
+		cp /usr/share/grub/fonts/unicode.pf2 isodir/boot/grub/fonts/unicode.pf2; \
+	fi
 	grub-mkrescue -o kernel.iso isodir
 
 # Build ISO with debug/test logging disabled for release workflows
@@ -105,13 +113,16 @@ runrelease: release test_fat32.img
 	$(QEMU) $(QEMU_FLAGS) -hda test_fat32.img
 
 run: $(KERNEL_ELF)
-	$(QEMU) $(QEMU_FLAGS) -hda test_fat32.img
+	$(QEMU) $(QEMU_FLAGS) -drive file=test_fat32.img,format=raw,if=ide
 
 run-nodisk: $(KERNEL_ELF)
 	$(QEMU) $(QEMU_FLAGS)
 
 runlog: $(KERNEL_ELF)
 	$(QEMU) $(QEMU_FLAGS) -d int,cpu_reset -D qemu.log
+
+run-gui: iso test_fat32.img
+	$(QEMU) -m 256 -vga std -serial stdio -boot d -cdrom kernel.iso -drive file=test_fat32.img,format=raw,if=ide
 
 runiso: iso
 	$(QEMU) -cdrom kernel.iso

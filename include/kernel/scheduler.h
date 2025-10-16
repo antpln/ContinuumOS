@@ -38,6 +38,8 @@ void scheduler_on_tick(registers_t* regs);
 void scheduler_force_switch();
 // Force a context switch using the provided register frame (e.g., from a syscall)
 void scheduler_force_switch_with_regs(registers_t* regs);
+// Exit current process and switch to next (does not return)
+void scheduler_exit_current_and_switch(registers_t* regs) __attribute__((noreturn));
 // Context switch to another process
 void context_switch(registers_t* regs);
 // Start executing the first scheduled process

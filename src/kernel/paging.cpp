@@ -16,6 +16,8 @@
 static uint32_t* kernel_page_directory = nullptr;
 static uint32_t* kernel_page_tables[IDENTITY_TABLES] = { nullptr };
 
+static constexpr bool VMM_VERBOSE_LOGGING = false;
+
 // Page fault handler
 void page_fault_handler(registers_t *registers) {
     uint32_t fault_addr;
@@ -101,15 +103,24 @@ void vmm_enable()
 
 void vmm_map(uint32_t virtual_addr, uint32_t physical_addr, int rw)
 {
-    debug("[VMM] Mapping vaddr=0x%x to paddr=0x%x, rw=%d", virtual_addr, physical_addr, rw);
+    if (VMM_VERBOSE_LOGGING)
+    {
+        debug("[VMM] Mapping vaddr=0x%x to paddr=0x%x, rw=%d", virtual_addr, physical_addr, rw);
+    }
 
     uint32_t pd_index = (virtual_addr >> 22) & 0x3FF;
     uint32_t pt_index = (virtual_addr >> 12) & 0x3FF;
 
     uint32_t pde_val = kernel_page_directory[pd_index];
     if ((pde_val & 1) == 0) {
-        error("[VMM] PDE[%d] not present!", pd_index);
-        return;
+        uint32_t* new_table = (uint32_t*)PhysicalMemoryManager::allocate_frame();
+        if (new_table == nullptr) {
+            error("[VMM] Failed to allocate page table for PDE[%d]", pd_index);
+            return;
+        }
+        memset(new_table, 0, PAGE_SIZE);
+        kernel_page_directory[pd_index] = (reinterpret_cast<uint32_t>(new_table) & 0xFFFFF000) | 0x03;
+        pde_val = kernel_page_directory[pd_index];
     }
 
     uint32_t pt_phys_base = pde_val & 0xFFFFF000;
@@ -118,8 +129,51 @@ void vmm_map(uint32_t virtual_addr, uint32_t physical_addr, int rw)
     uint32_t flags = (rw ? 0x3 : 0x1);
     pt_virt_base[pt_index] = (physical_addr & 0xFFFFF000) | flags;
 
-    debug("[VMM] PT[%d] = 0x%x", pt_index, pt_virt_base[pt_index]);
+    if (VMM_VERBOSE_LOGGING)
+    {
+        debug("[VMM] PT[%d] = 0x%x", pt_index, pt_virt_base[pt_index]);
+    }
 
     asm volatile("invlpg (%0)" :: "r"(virtual_addr) : "memory");
-    success("[VMM] Mapping done.");
+
+    if (VMM_VERBOSE_LOGGING)
+    {
+        success("[VMM] Mapping done.");
+    }
+}
+
+void vmm_map_range(uint32_t virtual_addr, uint32_t physical_addr, uint32_t size, int rw)
+{
+    if (size == 0)
+    {
+        return;
+    }
+
+    const uint32_t page_mask = PAGE_SIZE - 1;
+    const uint32_t virt_offset = virtual_addr & page_mask;
+    const uint32_t phys_offset = physical_addr & page_mask;
+
+    if (virt_offset != phys_offset)
+    {
+        error("[VMM] map_range offset mismatch (virt=0x%x phys=0x%x)", virtual_addr, physical_addr);
+        return;
+    }
+
+    uint32_t aligned_virtual = virtual_addr & ~page_mask;
+    uint32_t aligned_physical = physical_addr & ~page_mask;
+    uint32_t total_size = size + virt_offset;
+    uint32_t page_count = (total_size + PAGE_SIZE - 1) / PAGE_SIZE;
+
+    for (uint32_t page = 0; page < page_count; ++page)
+    {
+        uint32_t vaddr = aligned_virtual + page * PAGE_SIZE;
+        uint32_t paddr = aligned_physical + page * PAGE_SIZE;
+        vmm_map(vaddr, paddr, rw);
+    }
+
+    debug("[VMM] map_range vaddr=0x%x paddr=0x%x pages=%u rw=%d",
+          aligned_virtual,
+          aligned_physical,
+          page_count,
+          rw);
 }

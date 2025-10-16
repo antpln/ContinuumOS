@@ -1,7 +1,8 @@
 /* Declare constants for the multiboot header. */
 .set ALIGN,    1<<0             /* align loaded modules on page boundaries */
 .set MEMINFO,  1<<1             /* provide memory map */
-.set FLAGS,    ALIGN | MEMINFO  /* this is the Multiboot 'flag' field */
+.set VIDEO,    1<<2             /* request framebuffer information */
+.set FLAGS,    ALIGN | MEMINFO | VIDEO  /* this is the Multiboot 'flag' field */
 .set MAGIC,    0x1BADB002       /* 'magic number' lets bootloader find the header */
 .set CHECKSUM, -(MAGIC + FLAGS) /* checksum of above, to prove we are multiboot */
 
@@ -17,6 +18,15 @@ forced to be within the first 8 KiB of the kernel file.
 .long MAGIC
 .long FLAGS
 .long CHECKSUM
+.long 0               /* header_addr (unused) */
+.long 0               /* load_addr (unused) */
+.long 0               /* load_end_addr (unused) */
+.long 0               /* bss_end_addr (unused) */
+.long 0               /* entry_addr (unused) */
+.long 0               /* mode_type: 0 = Linear graphics */
+.long 1024            /* width */
+.long 768             /* height */
+.long 32              /* depth */
 
 /*
 The multiboot standard does not define the value of the stack pointer register
