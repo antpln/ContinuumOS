@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <kernel/keyboard.h>
+#include <kernel/mouse.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -11,6 +12,7 @@ extern "C" {
 typedef enum {
     EVENT_NONE = 0,
     EVENT_KEYBOARD,
+    EVENT_MOUSE,
     EVENT_PROCESS,
     EVENT_PCI,
 } EventType;
@@ -35,6 +37,7 @@ typedef struct {
     EventType type;
     union {
         keyboard_event keyboard;
+        MouseEvent mouse;
         process_event_data process;
         pci_event_data pci;
     } data;

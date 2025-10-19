@@ -16,6 +16,8 @@
 #include <kernel/memory.h>
 #include <kernel/scheduler.h>
 #include <process.h>
+#include <kernel/terminal_windows.h>
+#include <kernel/framebuffer.h>
 
 extern Terminal terminal;
 extern shell_command_t commands[];
@@ -27,13 +29,20 @@ static Process* g_shell_process = nullptr;
 
 typedef struct {
     char     buffer[SHELL_BUFFER_SIZE];
-    size_t   index;
+    size_t   cursor;
+    size_t   length;
     bool     input_enabled;
     bool     prompt_visible;
     char     history[SHELL_HISTORY_SIZE][SHELL_BUFFER_SIZE];
     size_t   history_count;
     int      history_nav;
     size_t   prompt_length;
+    size_t   prompt_row;
+    size_t   prompt_col;
+    size_t   cursor_row;
+    size_t   cursor_col;
+    size_t   rendered_chars;
+    char     prompt_cache[VFS_MAX_PATH + 16];
 } ShellState;
 
 static ShellState shell;
@@ -44,11 +53,99 @@ static inline void safe_strncpy(char* dst, const char* src, size_t n) {
     dst[n - 1] = '\0';
 }
 
-// Clear `length` characters from the terminal line
+// Legacy line clearing helper used when framebuffer GUI is unavailable
 static void clear_line(size_t length) {
     for (size_t i = 0; i < length; ++i) printf("\b");
     for (size_t i = 0; i < length; ++i) printf(" ");
     for (size_t i = 0; i < length; ++i) printf("\b");
+}
+
+static inline size_t shell_window_width() {
+    return Terminal::VGA_WIDTH;
+}
+
+static inline size_t shell_window_height() {
+    return Terminal::VGA_HEIGHT;
+}
+
+static void shell_advance_position(size_t &row, size_t &col) {
+    ++col;
+    if (col >= shell_window_width()) {
+        col = 0;
+        if (row + 1 < shell_window_height()) {
+            ++row;
+        }
+    }
+}
+
+static void shell_compute_position_from_offset(size_t offset, size_t &row, size_t &col) {
+    row = shell.prompt_row;
+    col = shell.prompt_col;
+    for (size_t i = 0; i < offset; ++i) {
+        shell_advance_position(row, col);
+    }
+}
+
+static void shell_render_input() {
+    if (!shell.prompt_visible || g_shell_process == nullptr || !framebuffer::is_available()) {
+        return;
+    }
+
+    const size_t height = shell_window_height();
+    const uint8_t color = terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+
+    shell.buffer[shell.length] = '\0';
+
+    size_t row = shell.prompt_row;
+    size_t col = shell.prompt_col;
+
+    auto put_char = [&](char ch) {
+        if (row < height) {
+            terminal_windows::window_put_char(g_shell_process, col, row, ch, color);
+        }
+        shell_advance_position(row, col);
+    };
+
+    for (size_t i = 0; i < shell.prompt_length; ++i) {
+        put_char(shell.prompt_cache[i]);
+    }
+
+    for (size_t i = 0; i < shell.length; ++i) {
+        put_char(shell.buffer[i]);
+    }
+
+    size_t total = shell.prompt_length + shell.length;
+    if (shell.rendered_chars > total) {
+        size_t diff = shell.rendered_chars - total;
+        while (diff-- > 0) {
+            put_char(' ');
+        }
+    }
+    shell.rendered_chars = total;
+
+    size_t caret_row;
+    size_t caret_col;
+    shell_compute_position_from_offset(shell.prompt_length + shell.cursor, caret_row, caret_col);
+    shell.cursor_row = caret_row;
+    shell.cursor_col = caret_col;
+    terminal_windows::window_set_cursor(g_shell_process, caret_row, caret_col, true);
+    terminal_windows::window_present(g_shell_process);
+}
+
+static void shell_render_input_legacy() {
+    size_t previous_total = shell.rendered_chars;
+    if (previous_total > 0) {
+        clear_line(previous_total);
+    }
+    printf("%s", shell.prompt_cache);
+    printf("%s", shell.buffer);
+    size_t tail = (shell.length > shell.cursor) ? (shell.length - shell.cursor) : 0;
+    for (size_t i = 0; i < tail; ++i) {
+        printf("\b");
+    }
+    shell.rendered_chars = shell.prompt_length + shell.length;
+    shell.cursor_row = 0;
+    shell.cursor_col = shell.prompt_length + shell.cursor;
 }
 
 // Print the shell prompt
@@ -80,19 +177,50 @@ static void shell_print_prompt(void) {
 
     prompt[pos] = '\0';
 
-    printf("%s", prompt);
     shell.prompt_length = pos;
-    shell.prompt_visible = true;
+    memcpy(shell.prompt_cache, prompt, pos);
+    shell.prompt_cache[pos] = '\0';
+
+    shell.cursor = 0;
+    shell.length = 0;
+    shell.buffer[0] = '\0';
+    shell.rendered_chars = 0;
+
+    if (g_shell_process != nullptr && framebuffer::is_available()) {
+        size_t start_row = 0;
+        size_t start_col = 0;
+        terminal_windows::window_get_cursor(g_shell_process, start_row, start_col);
+        terminal_windows::write_text(terminal, g_shell_process, prompt, pos);
+        shell.prompt_row = start_row;
+        shell.prompt_col = start_col;
+        shell.prompt_visible = true;
+        shell_render_input();
+    } else {
+        printf("%s", prompt);
+        shell.prompt_row = 0;
+        shell.prompt_col = shell.prompt_length;
+        shell.rendered_chars = shell.prompt_length;
+        shell.cursor_row = 0;
+        shell.cursor_col = shell.prompt_col;
+        shell.prompt_visible = true;
+    }
 }
 
 // Initialize shell state and print welcome message
 void shell_init(void) {
-    shell.index         = 0;
+    shell.cursor        = 0;
+    shell.length        = 0;
+    shell.rendered_chars = 0;
+    shell.prompt_row    = 0;
+    shell.prompt_col    = 0;
+    shell.cursor_row    = 0;
+    shell.cursor_col    = 0;
     shell.input_enabled = true;
     shell.prompt_visible = false;
     shell.history_count = 0;
     shell.history_nav   = -1;
     shell.prompt_length = 0;
+    shell.buffer[0]     = '\0';
     printf("Welcome to nutshell!\n");
     shell_print_prompt();
 }
@@ -138,6 +266,16 @@ void shell_set_input_enabled(bool enabled) {
     shell.input_enabled = enabled;
     if (!enabled) {
         shell.prompt_visible = false;
+        if (g_shell_process != nullptr && framebuffer::is_available()) {
+            terminal_windows::window_set_cursor(g_shell_process, shell.cursor_row, shell.cursor_col, false);
+        }
+    } else {
+        shell.prompt_visible = true;
+        if (framebuffer::is_available() && g_shell_process != nullptr) {
+            shell_render_input();
+        } else {
+            shell_render_input_legacy();
+        }
     }
 }
 
@@ -169,16 +307,22 @@ void shell_handle_key(keyboard_event ke) {
     }
     if (!shell.input_enabled) return;
 
+    const bool graphics = framebuffer::is_available() && g_shell_process != nullptr;
+
     // Up arrow: previous history
     if (ke.up_arrow) {
         const char* prev = shell_history_prev();
         if (prev) {
-            size_t len = shell.prompt_length + shell.index;
-            clear_line(len);
+            size_t previous_total = shell.prompt_length + shell.length;
             safe_strncpy(shell.buffer, prev, SHELL_BUFFER_SIZE);
-            shell.index = strlen(shell.buffer);
-            shell_print_prompt();
-            printf("%s", shell.buffer);
+            shell.length = strlen(shell.buffer);
+            shell.cursor = shell.length;
+            if (graphics) {
+                shell_render_input();
+            } else {
+                shell.rendered_chars = previous_total;
+                shell_render_input_legacy();
+            }
         }
         return;
     }
@@ -186,37 +330,80 @@ void shell_handle_key(keyboard_event ke) {
     // Down arrow: next history
     if (ke.down_arrow) {
         const char* next = shell_history_next();
-        size_t len = shell.prompt_length + shell.index;
-        clear_line(len);
+        size_t previous_total = shell.prompt_length + shell.length;
         if (next && *next) {
             safe_strncpy(shell.buffer, next, SHELL_BUFFER_SIZE);
-            shell.index = strlen(shell.buffer);
-            shell_print_prompt();
-            printf("%s", shell.buffer);
+            shell.length = strlen(shell.buffer);
+            shell.cursor = shell.length;
         } else {
             shell.buffer[0] = '\0';
-            shell.index = 0;
-            shell_print_prompt();
+            shell.length = 0;
+            shell.cursor = 0;
+        }
+        if (graphics) {
+            shell_render_input();
+        } else {
+            shell.rendered_chars = previous_total;
+            shell_render_input_legacy();
+        }
+        return;
+    }
+
+    if (ke.left_arrow) {
+        if (shell.cursor > 0) {
+            shell.cursor--;
+            if (graphics) {
+                shell_render_input();
+            } else {
+                shell_render_input_legacy();
+            }
+        }
+        return;
+    }
+
+    if (ke.right_arrow) {
+        if (shell.cursor < shell.length) {
+            shell.cursor++;
+            if (graphics) {
+                shell_render_input();
+            } else {
+                shell_render_input_legacy();
+            }
         }
         return;
     }
 
     // Backspace
     if (ke.backspace) {
-        if (shell.index > 0) {
-            shell.index--;
-            printf("\b \b");
+        if (shell.cursor > 0) {
+            size_t previous_total = shell.prompt_length + shell.length;
+            memmove(&shell.buffer[shell.cursor - 1],
+                    &shell.buffer[shell.cursor],
+                    shell.length - shell.cursor + 1);
+            shell.cursor--;
+            if (shell.length > 0) {
+                shell.length--;
+            }
+            if (graphics) {
+                shell_render_input();
+            } else {
+                shell.rendered_chars = previous_total;
+                shell_render_input_legacy();
+            }
         }
         return;
     }
 
     // Enter: execute command
     if (ke.enter) {
-        shell.buffer[shell.index] = '\0';
+        shell.buffer[shell.length] = '\0';
         printf("\n");
         shell_history_add(shell.buffer);
         shell_process_command(shell.buffer);
-        shell.index = 0;
+        shell.cursor = 0;
+        shell.length = 0;
+        shell.buffer[0] = '\0';
+        shell.rendered_chars = 0;
         shell_history_reset();
         shell.prompt_visible = false;
         // Only print a new prompt if input is still enabled
@@ -228,9 +415,20 @@ void shell_handle_key(keyboard_event ke) {
 
     // Printable character
     char c = kb_to_ascii(ke);
-    if (c && shell.index < SHELL_BUFFER_SIZE - 1) {
-        shell.buffer[shell.index++] = c;
-        printf("%c", c);
+    if (c && shell.length < SHELL_BUFFER_SIZE - 1) {
+        size_t previous_total = shell.prompt_length + shell.length;
+        memmove(&shell.buffer[shell.cursor + 1],
+                &shell.buffer[shell.cursor],
+                shell.length - shell.cursor + 1);
+        shell.buffer[shell.cursor] = c;
+        shell.cursor++;
+        shell.length++;
+        if (graphics) {
+            shell_render_input();
+        } else {
+            shell.rendered_chars = previous_total;
+            shell_render_input_legacy();
+        }
     }
 }
 
