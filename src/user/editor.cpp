@@ -3,8 +3,7 @@
 #include <string.h>
 #include <kernel/heap.h>
 #include <kernel/vga.h>
-#include <kernel/graphics.h>
-#include <kernel/framebuffer.h>
+#include <kernel/terminal_windows.h>
 #include <kernel/vfs.h>
 #include <kernel/scheduler.h>
 #include <kernel/process.h>
@@ -47,22 +46,22 @@ static inline void copy_line(char* dst, const char* src) {
 }
 
 void Editor::put_cell(size_t x, size_t y, char ch, uint8_t color) {
-    if (owner_proc && framebuffer::is_available()) {
-        graphics::put_char(x, y, ch, color);
+    if (owner_proc) {
+        terminal_windows::window_put_char(owner_proc, x, y, ch, color);
     } else {
         terminal.put_at(ch, color, x, y);
     }
 }
 
 void Editor::present_window() {
-    if (owner_proc && framebuffer::is_available()) {
-        graphics::present();
+    if (owner_proc) {
+        terminal_windows::window_present(owner_proc);
     }
 }
 
 void Editor::update_cursor_visual(size_t row, size_t column, bool active) {
-    if (owner_proc && framebuffer::is_available()) {
-        graphics::set_cursor(row, column, active);
+    if (owner_proc) {
+        terminal_windows::window_set_cursor(owner_proc, row, column, active);
     } else if (active) {
         terminal.set_cursor(row, column);
     }
@@ -73,9 +72,6 @@ void Editor::start(const char* path) {
     active = true;
     status_message[0] = '\0';
     owner_proc = scheduler_current_process();
-    if (owner_proc && framebuffer::is_available()) {
-        graphics::ensure_window();
-    }
 
     if (path) {
         strncpy(this->path, path, sizeof(this->path) - 1);

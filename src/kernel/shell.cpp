@@ -16,8 +16,8 @@
 #include <kernel/memory.h>
 #include <kernel/scheduler.h>
 #include <process.h>
+#include <kernel/terminal_windows.h>
 #include <kernel/framebuffer.h>
-#include <kernel/graphics.h>
 
 extern Terminal terminal;
 extern shell_command_t commands[];
@@ -61,11 +61,11 @@ static void clear_line(size_t length) {
 }
 
 static inline size_t shell_window_width() {
-    return framebuffer::is_available() ? graphics::columns() : Terminal::VGA_WIDTH;
+    return Terminal::VGA_WIDTH;
 }
 
 static inline size_t shell_window_height() {
-    return framebuffer::is_available() ? graphics::rows() : Terminal::VGA_HEIGHT;
+    return Terminal::VGA_HEIGHT;
 }
 
 static void shell_advance_position(size_t &row, size_t &col) {
@@ -92,8 +92,7 @@ static void shell_render_input() {
     }
 
     const size_t height = shell_window_height();
-    const size_t width = shell_window_width();
-    const graphics::Color color = graphics::make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    const uint8_t color = terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
 
     shell.buffer[shell.length] = '\0';
 
@@ -101,8 +100,8 @@ static void shell_render_input() {
     size_t col = shell.prompt_col;
 
     auto put_char = [&](char ch) {
-        if (row < height && col < width) {
-            graphics::put_char(col, row, ch, color);
+        if (row < height) {
+            terminal_windows::window_put_char(g_shell_process, col, row, ch, color);
         }
         shell_advance_position(row, col);
     };
@@ -129,8 +128,8 @@ static void shell_render_input() {
     shell_compute_position_from_offset(shell.prompt_length + shell.cursor, caret_row, caret_col);
     shell.cursor_row = caret_row;
     shell.cursor_col = caret_col;
-    graphics::set_cursor(caret_row, caret_col, true);
-    graphics::present();
+    terminal_windows::window_set_cursor(g_shell_process, caret_row, caret_col, true);
+    terminal_windows::window_present(g_shell_process);
 }
 
 static void shell_render_input_legacy() {
@@ -188,10 +187,10 @@ static void shell_print_prompt(void) {
     shell.rendered_chars = 0;
 
     if (g_shell_process != nullptr && framebuffer::is_available()) {
-        graphics::ensure_window();
         size_t start_row = 0;
         size_t start_col = 0;
-        graphics::get_cursor(start_row, start_col);
+        terminal_windows::window_get_cursor(g_shell_process, start_row, start_col);
+        terminal_windows::write_text(terminal, g_shell_process, prompt, pos);
         shell.prompt_row = start_row;
         shell.prompt_col = start_col;
         shell.prompt_visible = true;
@@ -268,7 +267,7 @@ void shell_set_input_enabled(bool enabled) {
     if (!enabled) {
         shell.prompt_visible = false;
         if (g_shell_process != nullptr && framebuffer::is_available()) {
-            graphics::set_cursor(shell.cursor_row, shell.cursor_col, false);
+            terminal_windows::window_set_cursor(g_shell_process, shell.cursor_row, shell.cursor_col, false);
         }
     } else {
         shell.prompt_visible = true;
