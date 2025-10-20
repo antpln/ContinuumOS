@@ -3,6 +3,8 @@
 #include <string.h>
 #include <kernel/heap.h>
 #include <kernel/vga.h>
+#include <kernel/graphics.h>
+#include <kernel/framebuffer.h>
 #include <kernel/vfs.h>
 #include <kernel/scheduler.h>
 #include <kernel/process.h>
@@ -44,10 +46,36 @@ static inline void copy_line(char* dst, const char* src) {
     dst[EDITOR_LINE_LENGTH - 1] = '\0';
 }
 
+void Editor::put_cell(size_t x, size_t y, char ch, uint8_t color) {
+    if (owner_proc && framebuffer::is_available()) {
+        graphics::put_char(x, y, ch, color);
+    } else {
+        terminal.put_at(ch, color, x, y);
+    }
+}
+
+void Editor::present_window() {
+    if (owner_proc && framebuffer::is_available()) {
+        graphics::present();
+    }
+}
+
+void Editor::update_cursor_visual(size_t row, size_t column, bool active) {
+    if (owner_proc && framebuffer::is_available()) {
+        graphics::set_cursor(row, column, active);
+    } else if (active) {
+        terminal.set_cursor(row, column);
+    }
+}
+
 // Start editing a file
 void Editor::start(const char* path) {
     active = true;
     status_message[0] = '\0';
+    owner_proc = scheduler_current_process();
+    if (owner_proc && framebuffer::is_available()) {
+        graphics::ensure_window();
+    }
 
     if (path) {
         strncpy(this->path, path, sizeof(this->path) - 1);
@@ -222,54 +250,59 @@ void Editor::exit(bool save) {
     }
     active = false;
     // Clear the status-bar row
-    int y = terminal.get_vga_height() - 1;
-    size_t width = terminal.get_vga_width();
+    int y = static_cast<int>(Terminal::VGA_HEIGHT) - 1;
+    const size_t width = Terminal::VGA_WIDTH;
+    const uint8_t fill_color = terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    update_cursor_visual(0, 0, false);
     for (size_t x = 0; x < width; ++x) {
-        terminal.put_at(' ',
-                        terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK),
-                        x, y);
+        put_cell(x, static_cast<size_t>(y), ' ', fill_color);
     }
+    present_window();
     // Do not kill the process or print the shell prompt here; leave that to editor_entry
 }
 
 // Draw a single line in the editor
 void Editor::draw_line(const char* text, int y, bool is_active_line) {
     const char* prefix = is_active_line ? PREFIX_ACTIVE : PREFIX_INACTIVE;
-    int prefix_len = is_active_line ? PREFIX_ACTIVE_LEN : PREFIX_INACTIVE_LEN;
+    const int prefix_len = is_active_line ? PREFIX_ACTIVE_LEN : PREFIX_INACTIVE_LEN;
 
-    size_t width = terminal.get_vga_width();
-    int max_content = (int)width - prefix_len;
+    const size_t width = Terminal::VGA_WIDTH;
+    int max_content = static_cast<int>(width) - prefix_len;
     if (max_content < 0) max_content = 0;
 
-    for (int i = 0; i < prefix_len && i < (int)width; ++i) {
-        terminal.put_at(prefix[i],
-                        terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK),
-                        i, y);
+    const uint8_t prefix_color = terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    for (int i = 0; i < prefix_len && i < static_cast<int>(width); ++i) {
+        put_cell(static_cast<size_t>(i), static_cast<size_t>(y), prefix[i], prefix_color);
     }
 
     int len = strlen(text);
-    if (len > max_content) len = max_content;
-    for (int i = 0; i < len; ++i) {
-        char c = text[i] ? text[i] : ' ';
-        int x = prefix_len + i;
-        auto color = (is_active_line && i == cursor_col)
-                   ? terminal.make_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE)
-                   : terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-        if (x < (int)width)
-            terminal.put_at(c, color, x, y);
+    if (len > max_content) {
+        len = max_content;
     }
 
-    for (int x = prefix_len + len; x < (int)width; ++x) {
-        terminal.put_at(' ',
-                        terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK),
-                        x, y);
+    for (int i = 0; i < len; ++i) {
+        char c = text[i] ? text[i] : ' ';
+        size_t x = static_cast<size_t>(prefix_len + i);
+        if (x >= width) {
+            break;
+        }
+        const bool cursor_here = is_active_line && i == cursor_col;
+        const uint8_t color = cursor_here
+                                  ? terminal.make_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE)
+                                  : terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+        put_cell(x, static_cast<size_t>(y), c, color);
+    }
+
+    const uint8_t fill_color = terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    for (size_t x = static_cast<size_t>(prefix_len + len); x < width; ++x) {
+        put_cell(x, static_cast<size_t>(y), ' ', fill_color);
     }
 }
 
 // Draw the status bar at the bottom
 void Editor::draw_status_bar() {
-    int y = terminal.get_vga_height() - 1;
-    size_t width = terminal.get_vga_width();
+    int y = static_cast<int>(Terminal::VGA_HEIGHT) - 1;
+    size_t width = Terminal::VGA_WIDTH;
     char line[EDITOR_LINE_LENGTH];
     int pos = 0;
 
@@ -307,11 +340,10 @@ void Editor::draw_status_bar() {
 
     int len = strlen(line);
     if (len > (int)width) len = (int)width;
-    for (int x = 0; x < (int)width; ++x) {
+    const uint8_t bar_color = terminal.make_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE);
+    for (int x = 0; x < static_cast<int>(width); ++x) {
         char c = (x < len) ? line[x] : ' ';
-        terminal.put_at(c,
-                        terminal.make_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE),
-                        x, y);
+        put_cell(static_cast<size_t>(x), static_cast<size_t>(y), c, bar_color);
     }
 }
 
@@ -323,14 +355,15 @@ void Editor::set_status_message(const char* msg) {
 
 // Render the editor view
 void Editor::render() {
-    int rows = terminal.get_vga_height() - 1;
+    const int total_rows = static_cast<int>(Terminal::VGA_HEIGHT);
+    int rows = total_rows - 1;
     if (cursor_line < viewport_offset) {
         viewport_offset = cursor_line;
     } else if (cursor_line >= viewport_offset + rows) {
         viewport_offset = cursor_line - rows + 1;
     }
 
-    size_t width = terminal.get_vga_width();
+    const size_t width = Terminal::VGA_WIDTH;
     int visible_rows = rows;
 
     for (int y = 0; y < visible_rows; ++y) {
@@ -338,10 +371,9 @@ void Editor::render() {
         if (idx < line_count) {
             draw_line(buffer[idx], y, idx == cursor_line);
         } else {
+            const uint8_t fill_color = terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
             for (size_t x = 0; x < width; ++x) {
-                terminal.put_at(' ',
-                                terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK),
-                                x, y);
+                put_cell(x, static_cast<size_t>(y), ' ', fill_color);
             }
         }
     }
@@ -351,7 +383,8 @@ void Editor::render() {
     int cy = cursor_line - viewport_offset;
     size_t cursor_x = (size_t)(cursor_col + PREFIX_ACTIVE_LEN);
     if (cursor_x >= width) cursor_x = width ? (width - 1) : 0;
-    terminal.set_cursor(cy, cursor_x);
+    update_cursor_visual(static_cast<size_t>(cy), cursor_x, true);
+    present_window();
 }
 
 // Insert a character at the cursor position

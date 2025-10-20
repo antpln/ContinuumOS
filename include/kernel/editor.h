@@ -3,6 +3,7 @@
 
 #include <kernel/keyboard.h>
 #include <kernel/vfs.h>
+#include <kernel/process.h>
 
 #define EDITOR_MAX_LINES    128
 #define EDITOR_LINE_LENGTH  128
@@ -25,6 +26,9 @@ private:
     void exit(bool save);
     void render();
     void draw_line(const char* text, int y, bool active_line);
+    void put_cell(size_t x, size_t y, char ch, uint8_t color);
+    void present_window();
+    void update_cursor_visual(size_t row, size_t column, bool active);
 
     void handle_char(char c);
     void handle_enter();
@@ -48,6 +52,7 @@ private:
     bool    active;
 
     char status_message[EDITOR_LINE_LENGTH]; // status bar message
+    Process* owner_proc = nullptr;
 };
 
 void editor_start(const char* path);
