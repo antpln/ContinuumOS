@@ -110,7 +110,7 @@ release:
 
 rundebug :
 	$(MAKE) clean
-	$(MAKE) EXTRA_CFLAGS="-UDEBUG -UTEST"
+	$(MAKE) 
 	$(QEMU) $(QEMU_FLAGS) -drive file=test_fat32.img,format=raw,if=ide
 
 runrelease :
