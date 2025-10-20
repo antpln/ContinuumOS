@@ -69,6 +69,17 @@ constexpr RGB TITLE_BOTTOM_SHADOW{18, 20, 30};
 constexpr RGB ACTIVE_ACCENT_GLOW{100, 160, 255};
 constexpr RGB TITLE_TEXT_SHADOW{18, 24, 32};
 
+constexpr uint32_t CLOSE_BUTTON_SIZE = 14;
+constexpr uint32_t CLOSE_BUTTON_MARGIN = 8;
+
+constexpr RGB CLOSE_BUTTON_BG{200, 60, 70};
+constexpr RGB CLOSE_BUTTON_FG{240, 240, 240};
+constexpr RGB FRAME_BORDER_HIGHLIGHT{38, 44, 58};
+constexpr RGB TITLE_TOP_HIGHLIGHT{130, 150, 210};
+constexpr RGB TITLE_BOTTOM_SHADOW{18, 20, 30};
+constexpr RGB ACTIVE_ACCENT_GLOW{100, 160, 255};
+constexpr RGB TITLE_TEXT_SHADOW{18, 24, 32};
+
 constexpr RGB FRAME_BORDER_COLOR{18, 22, 30};
 constexpr RGB FRAME_BACKGROUND_COLOR{30, 34, 46};
 constexpr RGB TITLE_ACTIVE_TOP{82, 128, 204};
@@ -680,6 +691,96 @@ WindowHitResult hit_test_window(uint32_t x, uint32_t y)
             result.local_x = rel_x;
             result.local_y = rel_y;
             result.resize_edges = resize_edges;
+            return true;
+        }
+
+        const uint32_t title_region = FRAME_BORDER + TITLE_BAR_HEIGHT;
+
+        result.slot = static_cast<int>(slot);
+        result.on_close_button = false;
+        result.on_title_bar = (rel_y < title_region);
+        result.local_x = rel_x;
+        result.local_y = rel_y;
+        return true;
+    };
+
+    if (g_active_slot >= 0 && test_slot(static_cast<size_t>(g_active_slot)))
+    {
+        return result;
+    }
+
+    for (size_t i = g_z_count; i > 0; --i)
+    {
+        size_t slot = g_z_order[i - 1];
+        if (static_cast<int>(slot) == g_active_slot)
+        {
+            continue;
+        }
+        if (test_slot(slot))
+        {
+            return result;
+        }
+    }
+
+    return result;
+}
+
+void stop_dragging()
+{
+    g_dragging_window = false;
+    g_drag_slot = INVALID_SLOT;
+    g_drag_offset_x = 0;
+    g_drag_offset_y = 0;
+}
+
+WindowHitResult hit_test_window(uint32_t x, uint32_t y)
+{
+    WindowHitResult result{};
+    if (!framebuffer::is_available() || !g_geometry_ready || g_z_count == 0)
+    {
+        return result;
+    }
+
+    auto test_slot = [&](size_t slot) -> bool {
+        if (!window_slot_valid(slot))
+        {
+            return false;
+        }
+
+        const Window &window = g_windows[slot];
+
+        const uint32_t frame_x = window.frame_x;
+        const uint32_t frame_y = window.frame_y;
+
+        if (x < frame_x || y < frame_y)
+        {
+            return false;
+        }
+
+        const uint32_t rel_x = x - frame_x;
+        const uint32_t rel_y = y - frame_y;
+
+        if (rel_x >= g_frame_width || rel_y >= g_frame_height)
+        {
+            return false;
+        }
+
+        const uint32_t inner_width = g_frame_width > 2U * FRAME_BORDER ? g_frame_width - 2U * FRAME_BORDER : 0U;
+        const uint32_t close_x_start = FRAME_BORDER + (inner_width > CLOSE_BUTTON_SIZE + CLOSE_BUTTON_MARGIN
+                                                           ? inner_width - CLOSE_BUTTON_MARGIN - CLOSE_BUTTON_SIZE
+                                                           : inner_width);
+        const uint32_t close_y_start = FRAME_BORDER + (TITLE_BAR_HEIGHT > CLOSE_BUTTON_SIZE
+                                                            ? (TITLE_BAR_HEIGHT - CLOSE_BUTTON_SIZE) / 2U
+                                                            : 0U);
+        if (inner_width > CLOSE_BUTTON_SIZE + CLOSE_BUTTON_MARGIN &&
+            rel_x >= close_x_start && rel_x < close_x_start + CLOSE_BUTTON_SIZE &&
+            rel_y >= close_y_start && rel_y < close_y_start + CLOSE_BUTTON_SIZE)
+        {
+            result.slot = static_cast<int>(slot);
+            result.on_close_button = true;
+            result.on_title_bar = false;
+            result.local_x = rel_x;
+            result.local_y = rel_y;
             return true;
         }
 
