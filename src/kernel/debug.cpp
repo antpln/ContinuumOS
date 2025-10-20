@@ -450,6 +450,8 @@ void render_gui_panic_screen(const char *message,
                       helper_color,
                       "System halted. Check the serial console for additional information.",
                       LINE_SPACING);
+
+    framebuffer::present();
 }
 } // namespace
 

@@ -47,6 +47,14 @@ extern "C"
 			serial_init();
 			multiboot_info_t *mb_info = reinterpret_cast<multiboot_info_t *>(multiboot_info_ptr);
 			bool framebuffer_ready = framebuffer::initialize(mb_info);
+			if (framebuffer_ready)
+			{
+				debug("Framebuffer ready (%ux%u@%u) double buffering %s",
+					  framebuffer::info().width,
+					  framebuffer::info().height,
+					  framebuffer::info().bpp,
+					  framebuffer::double_buffering_enabled() ? "on" : "off");
+			}
 
 		const char *ascii_guitar = R"(
           Q
