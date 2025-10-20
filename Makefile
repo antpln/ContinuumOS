@@ -108,24 +108,19 @@ release:
 	$(MAKE) clean
 	$(MAKE) iso EXTRA_CFLAGS="-UDEBUG -UTEST"
 
-# Run the release build in QEMU
-runrelease: release test_fat32.img
-	$(QEMU) $(QEMU_FLAGS) -hda test_fat32.img
-
-run: $(KERNEL_ELF)
+rundebug :
+	$(MAKE) clean
+	$(MAKE) EXTRA_CFLAGS="-UDEBUG -UTEST"
 	$(QEMU) $(QEMU_FLAGS) -drive file=test_fat32.img,format=raw,if=ide
 
-run-nodisk: $(KERNEL_ELF)
-	$(QEMU) $(QEMU_FLAGS)
-
-runlog: $(KERNEL_ELF)
-	$(QEMU) $(QEMU_FLAGS) -d int,cpu_reset -D qemu.log
-
-run-gui: iso test_fat32.img
-	$(QEMU) -m 256 -vga std -serial stdio -boot d -cdrom kernel.iso -drive file=test_fat32.img,format=raw,if=ide
+runrelease :
+	$(MAKE) clean
+	$(MAKE) EXTRA_CFLAGS="-UDEBUG -UTEST"
+	$(QEMU) $(QEMU_FLAGS) -drive file=test_fat32.img,format=raw,if=ide
 
 runiso: iso
-	$(QEMU) -cdrom kernel.iso
+	$(MAKE) iso EXTRA_CFLAGS="-UDEBUG -UTEST"
+	$(QEMU) $(QEMU_FLAGS) -cdrom kernel.iso
 
 clean:
 	rm -rf $(BUILD_DIR)
