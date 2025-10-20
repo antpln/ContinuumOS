@@ -189,7 +189,12 @@ void restore_cursor_background()
             {
                 break;
             }
-            framebuffer::fill_rect(px, py, 1, 1, g_cursor.background[row][col]);
+            framebuffer::fill_rect(px,
+                                   py,
+                                   1,
+                                   1,
+                                   g_cursor.background[row][col],
+                                   framebuffer::BufferTarget::Display);
         }
     }
     g_cursor.saved_height = 0;
@@ -225,7 +230,8 @@ void render_mouse_cursor()
                                   CURSOR_STRIDE,
                                   outline_color,
                                   0,
-                                  true);
+                                  true,
+                                  framebuffer::BufferTarget::Display);
     framebuffer::draw_mono_bitmap(static_cast<uint32_t>(g_cursor.x),
                                   static_cast<uint32_t>(g_cursor.y),
                                   CURSOR_WIDTH,
@@ -234,7 +240,8 @@ void render_mouse_cursor()
                                   CURSOR_STRIDE,
                                   fill_color,
                                   outline_color,
-                                  true);
+                                  true,
+                                  framebuffer::BufferTarget::Display);
 
     g_cursor.drawn = true;
 }
@@ -295,6 +302,7 @@ void draw_boot_screen()
     clear_background_fill_override();
     suspend_mouse_cursor();
     draw_background_gradient();
+    framebuffer::present();
     render_mouse_cursor();
 }
 
@@ -440,6 +448,7 @@ void begin_window_redraw()
 
 void end_window_redraw()
 {
+    framebuffer::present();
     if (g_cursor.visible && !g_cursor.drawn)
     {
         render_mouse_cursor();

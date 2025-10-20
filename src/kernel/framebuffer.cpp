@@ -14,6 +14,89 @@ bool g_available = false;
 uint32_t g_bytes_per_pixel = 0;
 uint32_t g_physical_address_low = 0;
 uint32_t g_framebuffer_size = 0;
+size_t g_frame_stride_bytes = 0;
+uint32_t g_virtual_height = 0;
+bool g_double_buffer_enabled = false;
+uint32_t g_buffer_count = 1;
+uint32_t g_display_buffer_index = 0;
+uint32_t g_draw_buffer_index = 0;
+bool g_frame_in_progress = false;
+
+uintptr_t buffer_base(uint32_t index)
+{
+    const size_t stride = g_frame_stride_bytes;
+    return g_info.address + static_cast<uintptr_t>(index) * static_cast<uintptr_t>(stride);
+}
+
+uint8_t *framebuffer_ptr(BufferTarget target)
+{
+    if (!g_double_buffer_enabled)
+    {
+        (void)target;
+        return reinterpret_cast<uint8_t *>(g_info.address);
+    }
+
+    const uint32_t index = (target == BufferTarget::Display) ? g_display_buffer_index : g_draw_buffer_index;
+    return reinterpret_cast<uint8_t *>(buffer_base(index));
+}
+
+void copy_buffer(uint32_t source_index, uint32_t dest_index)
+{
+    if (source_index == dest_index || g_frame_stride_bytes == 0)
+    {
+        return;
+    }
+
+    uint8_t *src = reinterpret_cast<uint8_t *>(buffer_base(source_index));
+    uint8_t *dst = reinterpret_cast<uint8_t *>(buffer_base(dest_index));
+    memcpy(dst, src, g_frame_stride_bytes);
+}
+
+void ensure_frame_started(bool preserve_contents)
+{
+    if (!g_double_buffer_enabled)
+    {
+        return;
+    }
+
+    if (g_frame_in_progress)
+    {
+        return;
+    }
+
+    if (preserve_contents)
+    {
+        copy_buffer(g_display_buffer_index, g_draw_buffer_index);
+    }
+
+    g_frame_in_progress = true;
+}
+
+bool try_enable_double_buffering();
+
+inline void store_color(uint8_t *dst, uint32_t color)
+{
+    switch (g_bytes_per_pixel)
+    {
+    case 4:
+        *reinterpret_cast<uint32_t *>(dst) = color;
+        break;
+    case 3:
+        dst[0] = static_cast<uint8_t>(color & 0xFF);
+        dst[1] = static_cast<uint8_t>((color >> 8) & 0xFF);
+        dst[2] = static_cast<uint8_t>((color >> 16) & 0xFF);
+        break;
+    case 2:
+        *reinterpret_cast<uint16_t *>(dst) = static_cast<uint16_t>(color & 0xFFFF);
+        break;
+    default:
+        for (uint32_t i = 0; i < g_bytes_per_pixel; ++i)
+        {
+            dst[i] = static_cast<uint8_t>((color >> (i * 8U)) & 0xFFU);
+        }
+        break;
+    }
+}
 
 struct [[gnu::packed]] VbeModeInfo
 {
@@ -242,6 +325,17 @@ uint16_t bga_read(uint16_t index)
     return inw(VBE_DISPI_IOPORT_DATA);
 }
 
+void set_display_buffer(uint32_t index)
+{
+    if (!g_double_buffer_enabled)
+    {
+        return;
+    }
+
+    const uint32_t offset_y = g_info.height * index;
+    bga_write(VBE_DISPI_INDEX_Y_OFFSET, static_cast<uint16_t>(offset_y));
+}
+
 bool adopt_framebuffer(const FrameBufferInfo &detected)
 {
     if (detected.width == 0 || detected.height == 0 || detected.pitch == 0 || detected.bpp == 0 || detected.address == 0)
@@ -265,6 +359,13 @@ bool adopt_framebuffer(const FrameBufferInfo &detected)
     g_bytes_per_pixel = bytes_per_pixel;
     g_physical_address_low = static_cast<uint32_t>(detected.address & 0xFFFFFFFFULL);
     g_framebuffer_size = static_cast<uint32_t>(size);
+    g_frame_stride_bytes = static_cast<size_t>(detected.pitch) * detected.height;
+    g_virtual_height = detected.height;
+    g_double_buffer_enabled = false;
+    g_buffer_count = 1;
+    g_display_buffer_index = 0;
+    g_draw_buffer_index = 0;
+    g_frame_in_progress = false;
     g_available = true;
     return true;
 }
@@ -314,6 +415,63 @@ bool initialize_bochs(uint32_t width, uint32_t height, uint32_t bpp)
     }
 
     debug("[FB] Bochs framebuffer configured %ux%u@%u", width, height, bpp);
+    return true;
+}
+
+bool try_enable_double_buffering()
+{
+    if (!g_available)
+    {
+        return false;
+    }
+
+    if (!bochs_available())
+    {
+        return false;
+    }
+
+    if (g_frame_stride_bytes == 0)
+    {
+        return false;
+    }
+
+    constexpr uint32_t desired_buffers = 2;
+    const uint32_t desired_virtual_height = g_info.height * desired_buffers;
+    if (desired_virtual_height == 0 || desired_virtual_height > 0xFFFFu)
+    {
+        return false;
+    }
+
+    bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
+    bga_write(VBE_DISPI_INDEX_VIRT_WIDTH, static_cast<uint16_t>(g_info.width));
+    bga_write(VBE_DISPI_INDEX_VIRT_HEIGHT, static_cast<uint16_t>(desired_virtual_height));
+    bga_write(VBE_DISPI_INDEX_Y_OFFSET, 0);
+    bga_write(VBE_DISPI_INDEX_ENABLE, static_cast<uint16_t>(VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED));
+
+    const uint16_t actual_height = bga_read(VBE_DISPI_INDEX_VIRT_HEIGHT);
+    if (actual_height < desired_virtual_height)
+    {
+        bga_write(VBE_DISPI_INDEX_VIRT_HEIGHT, static_cast<uint16_t>(g_info.height));
+        bga_write(VBE_DISPI_INDEX_Y_OFFSET, 0);
+        bga_write(VBE_DISPI_INDEX_ENABLE, static_cast<uint16_t>(VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED));
+        debug("[FB] Double buffering unavailable (virt_height=%u)", actual_height);
+        return false;
+    }
+
+    g_double_buffer_enabled = true;
+    g_buffer_count = desired_buffers;
+    g_virtual_height = desired_virtual_height;
+    g_framebuffer_size = static_cast<uint32_t>(g_frame_stride_bytes * g_buffer_count);
+    g_display_buffer_index = 0;
+    g_draw_buffer_index = 1 % g_buffer_count;
+    g_frame_in_progress = false;
+
+    copy_buffer(g_display_buffer_index, g_draw_buffer_index);
+    set_display_buffer(g_display_buffer_index);
+
+    debug("[FB] Double buffering enabled (%u buffers, stride=%zu)",
+          g_buffer_count,
+          g_frame_stride_bytes);
     return true;
 }
 
@@ -374,11 +532,6 @@ bool initialize_from_multiboot(const multiboot_info_t *info)
     return true;
 }
 
-inline uint8_t *framebuffer_ptr()
-{
-    return reinterpret_cast<uint8_t *>(g_info.address);
-}
-
 uint32_t pack_rgb24(uint8_t r, uint8_t g, uint8_t b)
 {
     return (static_cast<uint32_t>(r) << 16) |
@@ -394,17 +547,26 @@ bool initialize(const multiboot_info_t *info)
     g_bytes_per_pixel = 0;
     g_physical_address_low = 0;
     g_framebuffer_size = 0;
+    g_frame_stride_bytes = 0;
+    g_virtual_height = 0;
+    g_double_buffer_enabled = false;
+    g_buffer_count = 1;
+    g_display_buffer_index = 0;
+    g_draw_buffer_index = 0;
+    g_frame_in_progress = false;
 
     debug("[FB] Multiboot flags: 0x%x", info ? info->flags : 0U);
 
     if (info != nullptr && initialize_from_multiboot(info))
     {
+        try_enable_double_buffering();
         return true;
     }
 
     if (initialize_bochs(1024, 768, 32))
     {
         override_framebuffer_address_from_pci();
+        try_enable_double_buffering();
         return true;
     }
 
@@ -429,6 +591,11 @@ uint32_t framebuffer_physical_address()
 uint32_t framebuffer_size()
 {
     return g_framebuffer_size;
+}
+
+bool double_buffering_enabled()
+{
+    return g_double_buffer_enabled;
 }
 
 void update_address(uintptr_t new_address)
@@ -461,7 +628,12 @@ uint32_t pack_color(uint8_t r, uint8_t g, uint8_t b)
     }
 }
 
-void fill_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color)
+void fill_rect(uint32_t x,
+               uint32_t y,
+               uint32_t width,
+               uint32_t height,
+               uint32_t color,
+               BufferTarget target)
 {
     if (!g_available)
     {
@@ -487,39 +659,37 @@ void fill_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t
         height = g_info.height - y;
     }
 
-    uint8_t *base = framebuffer_ptr();
+    const bool draw_target = (target == BufferTarget::Draw);
+    if (draw_target)
+    {
+        const bool covers_full_frame = (x == 0) && (y == 0) && (width == g_info.width) && (height == g_info.height);
+        ensure_frame_started(!covers_full_frame);
+    }
+
+    uint8_t *base = framebuffer_ptr(target);
     const uint32_t row_stride = g_info.pitch;
+    const uint32_t pixel_stride = g_bytes_per_pixel;
+
+    if (g_bytes_per_pixel == 4)
+    {
+        for (uint32_t row = 0; row < height; ++row)
+        {
+            uint8_t *row_base = base + (y + row) * row_stride + x * pixel_stride;
+            uint32_t *dst = reinterpret_cast<uint32_t *>(row_base);
+            for (uint32_t col = 0; col < width; ++col)
+            {
+                dst[col] = color;
+            }
+        }
+        return;
+    }
 
     for (uint32_t row = 0; row < height; ++row)
     {
-        uint8_t *row_ptr = base + (y + row) * row_stride + x * g_bytes_per_pixel;
+        uint8_t *row_base = base + (y + row) * row_stride + x * pixel_stride;
         for (uint32_t col = 0; col < width; ++col)
         {
-            uint8_t *pixel = row_ptr + col * g_bytes_per_pixel;
-            switch (g_bytes_per_pixel)
-            {
-            case 4:
-            {
-                uint32_t value = color;
-                memcpy(pixel, &value, sizeof(uint32_t));
-                break;
-            }
-            case 3:
-            {
-                pixel[0] = static_cast<uint8_t>(color & 0xFF);
-                pixel[1] = static_cast<uint8_t>((color >> 8) & 0xFF);
-                pixel[2] = static_cast<uint8_t>((color >> 16) & 0xFF);
-                break;
-            }
-            case 2:
-            {
-                uint16_t value = static_cast<uint16_t>(color & 0xFFFF);
-                memcpy(pixel, &value, sizeof(uint16_t));
-                break;
-            }
-            default:
-                break;
-            }
+            store_color(row_base + col * pixel_stride, color);
         }
     }
 }
@@ -532,16 +702,47 @@ void draw_mono_bitmap(uint32_t x,
                       uint32_t stride,
                       uint32_t fg_color,
                       uint32_t bg_color,
-                      bool transparent_bg)
+                      bool transparent_bg,
+                      BufferTarget target)
 {
     if (!g_available || bitmap == nullptr)
     {
         return;
     }
 
+    if (width == 0 || height == 0)
+    {
+        return;
+    }
+
+    if (x >= g_info.width || y >= g_info.height)
+    {
+        return;
+    }
+
+    if (x + width > g_info.width)
+    {
+        width = g_info.width - x;
+    }
+    if (y + height > g_info.height)
+    {
+        height = g_info.height - y;
+    }
+
+    const bool draw_target = (target == BufferTarget::Draw);
+    if (draw_target)
+    {
+        ensure_frame_started(true);
+    }
+
+    uint8_t *base = framebuffer_ptr(target);
+    const uint32_t row_stride = g_info.pitch;
+    const uint32_t pixel_stride = g_bytes_per_pixel;
+
     for (uint32_t row = 0; row < height; ++row)
     {
         const uint8_t *bitmap_row = bitmap + row * stride;
+        uint8_t *row_base = base + (y + row) * row_stride + x * pixel_stride;
         for (uint32_t col = 0; col < width; ++col)
         {
             const uint32_t byte_index = col / 8;
@@ -552,12 +753,12 @@ void draw_mono_bitmap(uint32_t x,
                 continue;
             }
             uint32_t color = bit_set ? fg_color : bg_color;
-            fill_rect(x + col, y + row, 1, 1, color);
+            store_color(row_base + col * pixel_stride, color);
         }
     }
 }
 
-uint32_t peek_pixel(uint32_t x, uint32_t y)
+uint32_t peek_pixel(uint32_t x, uint32_t y, BufferTarget target)
 {
     if (!g_available)
     {
@@ -569,7 +770,7 @@ uint32_t peek_pixel(uint32_t x, uint32_t y)
         return 0;
     }
 
-    const uint8_t *base = framebuffer_ptr();
+    const uint8_t *base = framebuffer_ptr(target);
     const uint8_t *pixel = base + y * g_info.pitch + x * g_bytes_per_pixel;
 
     switch (g_bytes_per_pixel)
@@ -595,6 +796,24 @@ uint32_t peek_pixel(uint32_t x, uint32_t y)
     default:
         return 0;
     }
+}
+
+void present()
+{
+    if (!g_available || !g_double_buffer_enabled)
+    {
+        return;
+    }
+
+    if (!g_frame_in_progress)
+    {
+        return;
+    }
+
+    set_display_buffer(g_draw_buffer_index);
+    g_display_buffer_index = g_draw_buffer_index;
+    g_draw_buffer_index = (g_draw_buffer_index + 1) % g_buffer_count;
+    g_frame_in_progress = false;
 }
 
 } // namespace framebuffer
