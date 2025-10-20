@@ -29,6 +29,12 @@ struct Window
     Terminal::Snapshot snapshot{};
     uint32_t frame_x = 0;
     uint32_t frame_y = 0;
+    uint32_t frame_width = 0;
+    uint32_t frame_height = 0;
+    uint32_t content_width = 0;
+    uint32_t content_height = 0;
+    uint32_t visible_columns = Terminal::VGA_WIDTH;
+    uint32_t visible_rows = Terminal::VGA_HEIGHT;
     DirtyRegion dirty{};
 };
 
@@ -48,6 +54,9 @@ constexpr uint32_t INITIAL_FRAME_X = 40;
 constexpr uint32_t INITIAL_FRAME_Y = 72;
 constexpr uint32_t CASCADE_STEP_X = 28;
 constexpr uint32_t CASCADE_STEP_Y = 28;
+constexpr uint32_t RESIZE_MARGIN = 12;
+constexpr uint32_t MIN_VISIBLE_COLUMNS = 24;
+constexpr uint32_t MIN_VISIBLE_ROWS = 12;
 
 constexpr uint32_t CLOSE_BUTTON_SIZE = 14;
 constexpr uint32_t CLOSE_BUTTON_MARGIN = 8;
@@ -89,6 +98,12 @@ constexpr RGB VGA_PALETTE[16] = {
 };
 constexpr char FALLBACK_GLYPH = '?';
 
+constexpr uint8_t RESIZE_EDGE_NONE = 0;
+constexpr uint8_t RESIZE_EDGE_LEFT = 1u << 0;
+constexpr uint8_t RESIZE_EDGE_RIGHT = 1u << 1;
+constexpr uint8_t RESIZE_EDGE_TOP = 1u << 2;
+constexpr uint8_t RESIZE_EDGE_BOTTOM = 1u << 3;
+
 Window g_windows[MAX_WINDOWS];
 size_t g_window_count = 0;
 int g_active_slot = -1;
@@ -96,10 +111,6 @@ int g_active_slot = -1;
 size_t g_z_order[MAX_WINDOWS];
 size_t g_z_count = 0;
 
-uint32_t g_content_width = 0;
-uint32_t g_content_height = 0;
-uint32_t g_frame_width = 0;
-uint32_t g_frame_height = 0;
 uint32_t g_content_offset_x = 0;
 uint32_t g_content_offset_y = 0;
 bool g_geometry_ready = false;
@@ -117,12 +128,23 @@ struct WindowHitResult
     bool on_close_button = false;
     uint32_t local_x = 0;
     uint32_t local_y = 0;
+    uint8_t resize_edges = RESIZE_EDGE_NONE;
 };
 
 bool g_dragging_window = false;
 int g_drag_slot = -1;
 int32_t g_drag_offset_x = 0;
 int32_t g_drag_offset_y = 0;
+
+bool g_resizing_window = false;
+int g_resize_slot = -1;
+uint8_t g_resize_edges = RESIZE_EDGE_NONE;
+int32_t g_resize_start_cursor_x = 0;
+int32_t g_resize_start_cursor_y = 0;
+uint32_t g_resize_start_frame_x = 0;
+uint32_t g_resize_start_frame_y = 0;
+uint32_t g_resize_start_frame_width = 0;
+uint32_t g_resize_start_frame_height = 0;
 
 constexpr int INVALID_SLOT = -1;
 
@@ -230,6 +252,12 @@ void reset_dirty(DirtyRegion &region)
 }
 
 void stop_dragging();
+void stop_resizing();
+uint32_t clamp_u32(uint32_t value, uint32_t min_value, uint32_t max_value);
+uint32_t content_padding_width();
+uint32_t content_padding_height();
+void apply_visible_dimensions(Window &window, uint32_t columns, uint32_t rows);
+void clamp_frame(uint32_t &frame_x, uint32_t &frame_y, uint32_t frame_width, uint32_t frame_height);
 
 void close_window_slot(size_t slot, Terminal &terminal)
 {
@@ -241,6 +269,11 @@ void close_window_slot(size_t slot, Terminal &terminal)
     if (g_dragging_window && g_drag_slot == static_cast<int>(slot))
     {
         stop_dragging();
+    }
+
+    if (g_resizing_window && g_resize_slot == static_cast<int>(slot))
+    {
+        stop_resizing();
     }
 
     remove_slot_from_stack(slot);
@@ -307,6 +340,264 @@ void stop_dragging()
     g_drag_offset_y = 0;
 }
 
+void stop_resizing()
+{
+    g_resizing_window = false;
+    g_resize_slot = INVALID_SLOT;
+    g_resize_edges = RESIZE_EDGE_NONE;
+    g_resize_start_cursor_x = 0;
+    g_resize_start_cursor_y = 0;
+    g_resize_start_frame_x = 0;
+    g_resize_start_frame_y = 0;
+    g_resize_start_frame_width = 0;
+    g_resize_start_frame_height = 0;
+}
+
+void begin_resize(size_t slot, uint8_t edges, uint32_t cursor_x, uint32_t cursor_y)
+{
+    if (!window_slot_valid(slot))
+    {
+        return;
+    }
+
+    const Window &window = g_windows[slot];
+
+    g_resizing_window = true;
+    g_resize_slot = static_cast<int>(slot);
+    g_resize_edges = edges;
+    g_resize_start_cursor_x = static_cast<int32_t>(cursor_x);
+    g_resize_start_cursor_y = static_cast<int32_t>(cursor_y);
+    g_resize_start_frame_x = window.frame_x;
+    g_resize_start_frame_y = window.frame_y;
+    g_resize_start_frame_width = window.frame_width;
+    g_resize_start_frame_height = window.frame_height;
+}
+
+bool update_resize(Terminal &terminal, uint32_t cursor_x, uint32_t cursor_y)
+{
+    if (!g_resizing_window || g_resize_slot < 0 || !window_slot_valid(static_cast<size_t>(g_resize_slot)))
+    {
+        return false;
+    }
+
+    Window &window = g_windows[static_cast<size_t>(g_resize_slot)];
+    const auto &fb = framebuffer::info();
+    if (fb.width == 0 || fb.height == 0)
+    {
+        return false;
+    }
+
+    const uint32_t padding_w = content_padding_width();
+    const uint32_t padding_h = content_padding_height();
+
+    const int32_t start_left = static_cast<int32_t>(g_resize_start_frame_x);
+    const int32_t start_top = static_cast<int32_t>(g_resize_start_frame_y);
+    const int32_t start_right = static_cast<int32_t>(g_resize_start_frame_x + g_resize_start_frame_width);
+    const int32_t start_bottom = static_cast<int32_t>(g_resize_start_frame_y + g_resize_start_frame_height);
+
+    int32_t left = start_left;
+    int32_t top = start_top;
+    int32_t right = start_right;
+    int32_t bottom = start_bottom;
+
+    const int32_t delta_x = static_cast<int32_t>(cursor_x) - g_resize_start_cursor_x;
+    const int32_t delta_y = static_cast<int32_t>(cursor_y) - g_resize_start_cursor_y;
+
+    const int32_t min_frame_width = static_cast<int32_t>(MIN_VISIBLE_COLUMNS * gui::FONT_WIDTH + padding_w);
+    const int32_t min_frame_height = static_cast<int32_t>(MIN_VISIBLE_ROWS * gui::FONT_HEIGHT + padding_h);
+
+    if (g_resize_edges & RESIZE_EDGE_LEFT)
+    {
+        left = start_left + delta_x;
+        if (left < 0)
+        {
+            left = 0;
+        }
+        if (start_right - left < min_frame_width)
+        {
+            left = start_right - min_frame_width;
+        }
+    }
+
+    if (g_resize_edges & RESIZE_EDGE_RIGHT)
+    {
+        right = start_right + delta_x;
+        if (right > static_cast<int32_t>(fb.width))
+        {
+            right = static_cast<int32_t>(fb.width);
+        }
+        if (right - left < min_frame_width)
+        {
+            right = left + min_frame_width;
+        }
+    }
+
+    if (g_resize_edges & RESIZE_EDGE_TOP)
+    {
+        top = start_top + delta_y;
+        if (top < 0)
+        {
+            top = 0;
+        }
+        if (start_bottom - top < min_frame_height)
+        {
+            top = start_bottom - min_frame_height;
+        }
+    }
+
+    if (g_resize_edges & RESIZE_EDGE_BOTTOM)
+    {
+        bottom = start_bottom + delta_y;
+        if (bottom > static_cast<int32_t>(fb.height))
+        {
+            bottom = static_cast<int32_t>(fb.height);
+        }
+        if (bottom - top < min_frame_height)
+        {
+            bottom = top + min_frame_height;
+        }
+    }
+
+    if (right <= left)
+    {
+        right = left + min_frame_width;
+    }
+    if (bottom <= top)
+    {
+        bottom = top + min_frame_height;
+    }
+
+    if (right > static_cast<int32_t>(fb.width))
+    {
+        right = static_cast<int32_t>(fb.width);
+        left = right - min_frame_width;
+        if (left < 0)
+        {
+            left = 0;
+        }
+    }
+
+    if (bottom > static_cast<int32_t>(fb.height))
+    {
+        bottom = static_cast<int32_t>(fb.height);
+        top = bottom - min_frame_height;
+        if (top < 0)
+        {
+            top = 0;
+        }
+    }
+
+    int32_t width = right - left;
+    int32_t height = bottom - top;
+
+    if (width < min_frame_width)
+    {
+        width = min_frame_width;
+        if (g_resize_edges & RESIZE_EDGE_LEFT)
+        {
+            left = right - width;
+        }
+        else
+        {
+            right = left + width;
+        }
+    }
+
+    if (height < min_frame_height)
+    {
+        height = min_frame_height;
+        if (g_resize_edges & RESIZE_EDGE_TOP)
+        {
+            top = bottom - height;
+        }
+        else
+        {
+            bottom = top + height;
+        }
+    }
+
+    const uint32_t max_columns_fb = (fb.width > padding_w) ? ((fb.width - padding_w) / gui::FONT_WIDTH) : MIN_VISIBLE_COLUMNS;
+    const uint32_t max_rows_fb = (fb.height > padding_h) ? ((fb.height - padding_h) / gui::FONT_HEIGHT) : MIN_VISIBLE_ROWS;
+
+    uint32_t proposed_content_width = width > static_cast<int32_t>(padding_w)
+                                          ? static_cast<uint32_t>(width - static_cast<int32_t>(padding_w))
+                                          : 0U;
+    uint32_t proposed_columns = proposed_content_width / gui::FONT_WIDTH;
+    proposed_columns = clamp_u32(proposed_columns,
+                                 MIN_VISIBLE_COLUMNS,
+                                 max_columns_fb < MIN_VISIBLE_COLUMNS ? MIN_VISIBLE_COLUMNS
+                                                                      : (max_columns_fb > Terminal::VGA_WIDTH ? Terminal::VGA_WIDTH : max_columns_fb));
+
+    uint32_t proposed_content_height = height > static_cast<int32_t>(padding_h)
+                                           ? static_cast<uint32_t>(height - static_cast<int32_t>(padding_h))
+                                           : 0U;
+    uint32_t proposed_rows = proposed_content_height / gui::FONT_HEIGHT;
+    proposed_rows = clamp_u32(proposed_rows,
+                              MIN_VISIBLE_ROWS,
+                              max_rows_fb < MIN_VISIBLE_ROWS ? MIN_VISIBLE_ROWS
+                                                             : (max_rows_fb > Terminal::VGA_HEIGHT ? Terminal::VGA_HEIGHT : max_rows_fb));
+
+    const uint32_t new_frame_width = proposed_columns * gui::FONT_WIDTH + padding_w;
+    const uint32_t new_frame_height = proposed_rows * gui::FONT_HEIGHT + padding_h;
+
+    uint32_t new_frame_x = static_cast<uint32_t>(left < 0 ? 0 : left);
+    uint32_t new_frame_y = static_cast<uint32_t>(top < 0 ? 0 : top);
+
+    if ((g_resize_edges & RESIZE_EDGE_LEFT) && !(g_resize_edges & RESIZE_EDGE_RIGHT))
+    {
+        const uint32_t anchor_right = right < 0 ? 0U : static_cast<uint32_t>(right);
+        if (anchor_right < new_frame_width)
+        {
+            new_frame_x = 0;
+        }
+        else
+        {
+            new_frame_x = anchor_right - new_frame_width;
+        }
+    }
+
+    if ((g_resize_edges & RESIZE_EDGE_TOP) && !(g_resize_edges & RESIZE_EDGE_BOTTOM))
+    {
+        const uint32_t anchor_bottom = bottom < 0 ? 0U : static_cast<uint32_t>(bottom);
+        if (anchor_bottom < new_frame_height)
+        {
+            new_frame_y = 0;
+        }
+        else
+        {
+            new_frame_y = anchor_bottom - new_frame_height;
+        }
+    }
+
+    clamp_frame(new_frame_x, new_frame_y, new_frame_width, new_frame_height);
+
+    if (new_frame_width == window.frame_width &&
+        new_frame_height == window.frame_height &&
+        new_frame_x == window.frame_x &&
+        new_frame_y == window.frame_y)
+    {
+        return false;
+    }
+
+    const uint32_t old_frame_x = window.frame_x;
+    const uint32_t old_frame_y = window.frame_y;
+    const uint32_t old_frame_width = window.frame_width;
+    const uint32_t old_frame_height = window.frame_height;
+
+    apply_visible_dimensions(window, proposed_columns, proposed_rows);
+    window.frame_x = new_frame_x;
+    window.frame_y = new_frame_y;
+    mark_full_dirty(window.dirty);
+
+    if (old_frame_width > 0 && old_frame_height > 0)
+    {
+        gui::fill_background_rect(old_frame_x, old_frame_y, old_frame_width, old_frame_height);
+    }
+
+    draw_windows(terminal);
+    return true;
+}
+
 WindowHitResult hit_test_window(uint32_t x, uint32_t y)
 {
     WindowHitResult result{};
@@ -334,12 +625,15 @@ WindowHitResult hit_test_window(uint32_t x, uint32_t y)
         const uint32_t rel_x = x - frame_x;
         const uint32_t rel_y = y - frame_y;
 
-        if (rel_x >= g_frame_width || rel_y >= g_frame_height)
+        const uint32_t frame_width = window.frame_width;
+        const uint32_t frame_height = window.frame_height;
+
+        if (rel_x >= frame_width || rel_y >= frame_height)
         {
             return false;
         }
 
-        const uint32_t inner_width = g_frame_width > 2U * FRAME_BORDER ? g_frame_width - 2U * FRAME_BORDER : 0U;
+        const uint32_t inner_width = frame_width > 2U * FRAME_BORDER ? frame_width - 2U * FRAME_BORDER : 0U;
         const uint32_t close_x_start = FRAME_BORDER + (inner_width > CLOSE_BUTTON_SIZE + CLOSE_BUTTON_MARGIN
                                                            ? inner_width - CLOSE_BUTTON_MARGIN - CLOSE_BUTTON_SIZE
                                                            : inner_width);
@@ -355,6 +649,37 @@ WindowHitResult hit_test_window(uint32_t x, uint32_t y)
             result.on_title_bar = false;
             result.local_x = rel_x;
             result.local_y = rel_y;
+            return true;
+        }
+
+        const uint32_t dist_right = frame_width > rel_x ? frame_width - rel_x : 0U;
+        const uint32_t dist_bottom = frame_height > rel_y ? frame_height - rel_y : 0U;
+        uint8_t resize_edges = RESIZE_EDGE_NONE;
+        if (rel_x < RESIZE_MARGIN)
+        {
+            resize_edges |= RESIZE_EDGE_LEFT;
+        }
+        if (dist_right <= RESIZE_MARGIN)
+        {
+            resize_edges |= RESIZE_EDGE_RIGHT;
+        }
+        if (rel_y < RESIZE_MARGIN && rel_y <= FRAME_BORDER + 4U)
+        {
+            resize_edges |= RESIZE_EDGE_TOP;
+        }
+        if (dist_bottom <= RESIZE_MARGIN)
+        {
+            resize_edges |= RESIZE_EDGE_BOTTOM;
+        }
+
+        if (resize_edges != RESIZE_EDGE_NONE)
+        {
+            result.slot = static_cast<int>(slot);
+            result.on_close_button = false;
+            result.on_title_bar = false;
+            result.local_x = rel_x;
+            result.local_y = rel_y;
+            result.resize_edges = resize_edges;
             return true;
         }
 
@@ -400,20 +725,56 @@ uint32_t content_origin_x(const Window &window);
 uint32_t content_origin_y(const Window &window);
 WindowHitResult hit_test_window(uint32_t x, uint32_t y);
 void stop_dragging();
+void stop_resizing();
+void begin_resize(size_t slot, uint8_t edges, uint32_t cursor_x, uint32_t cursor_y);
+bool update_resize(Terminal &terminal, uint32_t cursor_x, uint32_t cursor_y);
+
+uint32_t clamp_u32(uint32_t value, uint32_t min_value, uint32_t max_value)
+{
+    if (value < min_value)
+    {
+        return min_value;
+    }
+    if (value > max_value)
+    {
+        return max_value;
+    }
+    return value;
+}
+
+uint32_t content_padding_width()
+{
+    return 2U * FRAME_BORDER + 2U * CONTENT_PADDING_X;
+}
+
+uint32_t content_padding_height()
+{
+    return 2U * FRAME_BORDER + TITLE_BAR_HEIGHT + CONTENT_PADDING_BOTTOM;
+}
+
+void apply_visible_dimensions(Window &window, uint32_t columns, uint32_t rows)
+{
+    columns = clamp_u32(columns, MIN_VISIBLE_COLUMNS, Terminal::VGA_WIDTH);
+    rows = clamp_u32(rows, MIN_VISIBLE_ROWS, Terminal::VGA_HEIGHT);
+
+    window.visible_columns = columns;
+    window.visible_rows = rows;
+    window.content_width = columns * gui::FONT_WIDTH;
+    window.content_height = rows * gui::FONT_HEIGHT;
+    window.frame_width = window.content_width + content_padding_width();
+    window.frame_height = window.content_height + content_padding_height();
+}
 
 void ensure_geometry(Terminal &terminal)
 {
+    (void)terminal;
     if (g_geometry_ready || !framebuffer::is_available())
     {
         return;
     }
 
-    g_content_width = static_cast<uint32_t>(terminal.pixel_width());
-    g_content_height = static_cast<uint32_t>(terminal.pixel_height());
     g_content_offset_x = FRAME_BORDER + CONTENT_PADDING_X;
     g_content_offset_y = FRAME_BORDER + TITLE_BAR_HEIGHT;
-    g_frame_width = g_content_width + 2U * FRAME_BORDER + 2U * CONTENT_PADDING_X;
-    g_frame_height = g_content_height + 2U * FRAME_BORDER + TITLE_BAR_HEIGHT + CONTENT_PADDING_BOTTOM;
     g_geometry_ready = true;
 }
 
@@ -573,14 +934,27 @@ void draw_snapshot_contents(const Window &window, bool active, size_t start_row 
         return;
     }
 
-    if (start_row >= Terminal::VGA_HEIGHT)
+    if (window.visible_rows == 0 || window.visible_columns == 0)
     {
         return;
     }
 
-    if (end_row >= Terminal::VGA_HEIGHT)
+    const size_t max_rows = window.visible_rows <= Terminal::VGA_HEIGHT ? window.visible_rows : Terminal::VGA_HEIGHT;
+    const size_t max_cols = window.visible_columns <= Terminal::VGA_WIDTH ? window.visible_columns : Terminal::VGA_WIDTH;
+
+    if (max_rows == 0 || max_cols == 0)
     {
-        end_row = Terminal::VGA_HEIGHT - 1;
+        return;
+    }
+
+    if (start_row >= max_rows)
+    {
+        return;
+    }
+
+    if (end_row >= max_rows)
+    {
+        end_row = max_rows - 1;
     }
 
     if (start_row > end_row)
@@ -600,7 +974,7 @@ void draw_snapshot_contents(const Window &window, bool active, size_t start_row 
             break;
         }
 
-        for (size_t col = 0; col < Terminal::VGA_WIDTH; ++col)
+        for (size_t col = 0; col < max_cols; ++col)
         {
             const uint32_t cell_x = base_x + static_cast<uint32_t>(col) * gui::FONT_WIDTH;
             if (cell_x >= framebuffer::info().width)
@@ -656,7 +1030,9 @@ void draw_snapshot_contents(const Window &window, bool active, size_t start_row 
         }
     }
 
-    if (active && window.snapshot.cursor_active)
+    if (active && window.snapshot.cursor_active &&
+        window.snapshot.cursor_row < window.visible_rows &&
+        window.snapshot.cursor_column < window.visible_columns)
     {
         const uint32_t caret_x = base_x + static_cast<uint32_t>(window.snapshot.cursor_column) * gui::FONT_WIDTH;
         const uint32_t caret_y = base_y + static_cast<uint32_t>(window.snapshot.cursor_row) * gui::FONT_HEIGHT;
@@ -696,7 +1072,7 @@ void present_window_slot(size_t slot)
     reset_dirty(window.dirty);
 }
 
-void clamp_frame(uint32_t &frame_x, uint32_t &frame_y)
+void clamp_frame(uint32_t &frame_x, uint32_t &frame_y, uint32_t frame_width, uint32_t frame_height)
 {
     if (!framebuffer::is_available() || !g_geometry_ready)
     {
@@ -707,22 +1083,22 @@ void clamp_frame(uint32_t &frame_x, uint32_t &frame_y)
 
     const auto &fb = framebuffer::info();
 
-    if (g_frame_width >= fb.width)
+    if (frame_width >= fb.width)
     {
         frame_x = 0;
     }
-    else if (frame_x + g_frame_width > fb.width)
+    else if (frame_x + frame_width > fb.width)
     {
-        frame_x = fb.width - g_frame_width;
+        frame_x = fb.width - frame_width;
     }
 
-    if (g_frame_height >= fb.height)
+    if (frame_height >= fb.height)
     {
         frame_y = 0;
     }
-    else if (frame_y + g_frame_height > fb.height)
+    else if (frame_y + frame_height > fb.height)
     {
-        frame_y = fb.height - g_frame_height;
+        frame_y = fb.height - frame_height;
     }
 }
 
@@ -812,13 +1188,19 @@ void draw_window_frame(const Window &window, bool active)
 
     const uint32_t frame_x = window.frame_x;
     const uint32_t frame_y = window.frame_y;
+    const uint32_t frame_width = window.frame_width;
+    const uint32_t frame_height = window.frame_height;
+    if (frame_width == 0 || frame_height == 0)
+    {
+        return;
+    }
     const uint32_t inner_x = frame_x + FRAME_BORDER;
     const uint32_t inner_y = frame_y + FRAME_BORDER;
-    const uint32_t inner_width = g_frame_width > 2U * FRAME_BORDER ? g_frame_width - 2U * FRAME_BORDER : 0;
-    const uint32_t inner_height = g_frame_height > 2U * FRAME_BORDER ? g_frame_height - 2U * FRAME_BORDER : 0;
+    const uint32_t inner_width = frame_width > 2U * FRAME_BORDER ? frame_width - 2U * FRAME_BORDER : 0;
+    const uint32_t inner_height = frame_height > 2U * FRAME_BORDER ? frame_height - 2U * FRAME_BORDER : 0;
 
-    framebuffer::fill_rect(frame_x, frame_y, g_frame_width, g_frame_height, pack(FRAME_BORDER_COLOR));
-    framebuffer::fill_rect(frame_x, frame_y, g_frame_width, 1, pack(FRAME_BORDER_HIGHLIGHT));
+    framebuffer::fill_rect(frame_x, frame_y, frame_width, frame_height, pack(FRAME_BORDER_COLOR));
+    framebuffer::fill_rect(frame_x, frame_y, frame_width, 1, pack(FRAME_BORDER_HIGHLIGHT));
 
     if (inner_width == 0 || inner_height == 0)
     {
@@ -928,7 +1310,14 @@ void render_window(Terminal &terminal, Window &window, bool active)
 {
     (void)terminal;
 
-    framebuffer::fill_rect(content_origin_x(window), content_origin_y(window), g_content_width, g_content_height, pack(CONTENT_BACKGROUND_COLOR));
+    if (window.content_width > 0 && window.content_height > 0)
+    {
+        framebuffer::fill_rect(content_origin_x(window),
+                               content_origin_y(window),
+                               window.content_width,
+                               window.content_height,
+                               pack(CONTENT_BACKGROUND_COLOR));
+    }
     draw_window_frame(window, active);
     draw_snapshot_contents(window, active);
     reset_dirty(window.dirty);
@@ -972,6 +1361,7 @@ void reset_windows()
     g_z_count = 0;
     g_active_slot = INVALID_SLOT;
     stop_dragging();
+    stop_resizing();
 }
 } // namespace
 
@@ -1061,11 +1451,12 @@ void request_new_window(Terminal &terminal, Process *proc)
     window.owner = proc;
     window.snapshot = g_blank_snapshot;
     reset_dirty(window.dirty);
+    apply_visible_dimensions(window, Terminal::VGA_WIDTH, Terminal::VGA_HEIGHT);
 
     const size_t cascade_index = g_z_count;
     uint32_t frame_x = INITIAL_FRAME_X + static_cast<uint32_t>(cascade_index) * CASCADE_STEP_X;
     uint32_t frame_y = INITIAL_FRAME_Y + static_cast<uint32_t>(cascade_index) * CASCADE_STEP_Y;
-    clamp_frame(frame_x, frame_y);
+    clamp_frame(frame_x, frame_y, window.frame_width, window.frame_height);
     window.frame_x = frame_x;
     window.frame_y = frame_y;
 
@@ -1116,7 +1507,7 @@ void set_active_window_origin(Terminal &terminal, Process *proc, int32_t x, int3
     uint32_t frame_x = desired_x > g_content_offset_x ? desired_x - g_content_offset_x : 0U;
     uint32_t frame_y = desired_y > g_content_offset_y ? desired_y - g_content_offset_y : 0U;
 
-    clamp_frame(frame_x, frame_y);
+    clamp_frame(frame_x, frame_y, window.frame_width, window.frame_height);
 
     window.frame_x = frame_x;
     window.frame_y = frame_y;
@@ -1313,9 +1704,10 @@ bool handle_mouse_event(Terminal &terminal, const MouseEvent &event)
     const uint32_t cursor_x = event.x < 0 ? 0U : static_cast<uint32_t>(event.x);
     const uint32_t cursor_y = event.y < 0 ? 0U : static_cast<uint32_t>(event.y);
 
+    const bool left_down = (event.buttons & MOUSE_BUTTON_LEFT) != 0;
     const bool left_changed = (event.changed & MOUSE_BUTTON_LEFT) != 0;
-    const bool left_pressed = left_changed && (event.buttons & MOUSE_BUTTON_LEFT);
-    const bool left_released = left_changed && (event.buttons & MOUSE_BUTTON_LEFT) == 0;
+    const bool left_pressed = left_changed && left_down;
+    const bool left_released = left_changed && !left_down;
 
     bool consumed = false;
 
@@ -1344,6 +1736,7 @@ bool handle_mouse_event(Terminal &terminal, const MouseEvent &event)
             if (hit.on_close_button)
             {
                 stop_dragging();
+                stop_resizing();
                 consumed = true;
                 if (window.owner != nullptr)
                 {
@@ -1356,11 +1749,18 @@ bool handle_mouse_event(Terminal &terminal, const MouseEvent &event)
                 return true;
             }
 
-            if (g_active_slot >= 0 && window_slot_valid(static_cast<size_t>(g_active_slot)))
+            if (hit.resize_edges != RESIZE_EDGE_NONE)
+            {
+                stop_dragging();
+                begin_resize(static_cast<size_t>(hit.slot), hit.resize_edges, cursor_x, cursor_y);
+                consumed = true;
+            }
+            else if (g_active_slot >= 0 && window_slot_valid(static_cast<size_t>(g_active_slot)))
             {
                 Window &active_window = g_windows[static_cast<size_t>(g_active_slot)];
                 if (hit.on_title_bar)
                 {
+                    stop_resizing();
                     g_dragging_window = true;
                     g_drag_slot = g_active_slot;
                     g_drag_offset_x = static_cast<int32_t>(cursor_x) - static_cast<int32_t>(active_window.frame_x);
@@ -1369,23 +1769,37 @@ bool handle_mouse_event(Terminal &terminal, const MouseEvent &event)
                 else
                 {
                     stop_dragging();
+                    stop_resizing();
                 }
+                consumed = true;
             }
-
-            consumed = true;
         }
         else
         {
             stop_dragging();
+            stop_resizing();
         }
     }
     else if (left_released)
     {
-        if (g_dragging_window)
+        if (g_dragging_window || g_resizing_window)
         {
             consumed = true;
         }
         stop_dragging();
+        stop_resizing();
+    }
+
+    if (g_resizing_window)
+    {
+        if (!left_down)
+        {
+            stop_resizing();
+        }
+        else if (update_resize(terminal, cursor_x, cursor_y))
+        {
+            return true;
+        }
     }
 
     if (g_dragging_window && g_drag_slot >= 0 && window_slot_valid(static_cast<size_t>(g_drag_slot)))
@@ -1393,6 +1807,8 @@ bool handle_mouse_event(Terminal &terminal, const MouseEvent &event)
         Window &window = g_windows[static_cast<size_t>(g_drag_slot)];
         const uint32_t old_frame_x = window.frame_x;
         const uint32_t old_frame_y = window.frame_y;
+        const uint32_t old_frame_width = window.frame_width;
+        const uint32_t old_frame_height = window.frame_height;
         int32_t desired_x = static_cast<int32_t>(cursor_x) - g_drag_offset_x;
         int32_t desired_y = static_cast<int32_t>(cursor_y) - g_drag_offset_y;
 
@@ -1407,13 +1823,13 @@ bool handle_mouse_event(Terminal &terminal, const MouseEvent &event)
 
         uint32_t frame_x = static_cast<uint32_t>(desired_x);
         uint32_t frame_y = static_cast<uint32_t>(desired_y);
-        clamp_frame(frame_x, frame_y);
+        clamp_frame(frame_x, frame_y, window.frame_width, window.frame_height);
 
         if (frame_x != old_frame_x || frame_y != old_frame_y)
         {
-            if (g_frame_width > 0 && g_frame_height > 0)
+            if (old_frame_width > 0 && old_frame_height > 0)
             {
-                gui::fill_background_rect(old_frame_x, old_frame_y, g_frame_width, g_frame_height);
+                gui::fill_background_rect(old_frame_x, old_frame_y, old_frame_width, old_frame_height);
             }
             window.frame_x = frame_x;
             window.frame_y = frame_y;
