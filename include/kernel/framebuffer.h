@@ -7,6 +7,12 @@
 
 namespace framebuffer
 {
+enum class BufferTarget
+{
+    Draw,
+    Display
+};
+
 struct FrameBufferInfo
 {
     uint32_t width = 0;
@@ -22,9 +28,15 @@ const FrameBufferInfo &info();
 
 uint32_t framebuffer_physical_address();
 uint32_t framebuffer_size();
+bool double_buffering_enabled();
 
 uint32_t pack_color(uint8_t r, uint8_t g, uint8_t b);
-void fill_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color);
+void fill_rect(uint32_t x,
+               uint32_t y,
+               uint32_t width,
+               uint32_t height,
+               uint32_t color,
+               BufferTarget target = BufferTarget::Draw);
 void draw_mono_bitmap(uint32_t x,
                       uint32_t y,
                       uint32_t width,
@@ -33,6 +45,10 @@ void draw_mono_bitmap(uint32_t x,
                       uint32_t stride,
                       uint32_t fg_color,
                       uint32_t bg_color,
-                      bool transparent_bg);
-uint32_t peek_pixel(uint32_t x, uint32_t y);
+                      bool transparent_bg,
+                      BufferTarget target = BufferTarget::Draw);
+uint32_t peek_pixel(uint32_t x,
+                    uint32_t y,
+                    BufferTarget target = BufferTarget::Display);
+void present();
 }

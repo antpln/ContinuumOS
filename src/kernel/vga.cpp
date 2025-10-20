@@ -94,6 +94,11 @@ void Terminal::initialize()
 		}
 	}
 
+	if (framebuffer_mode)
+	{
+		framebuffer::present();
+	}
+
 	update_cursor();
 }
 
@@ -154,7 +159,12 @@ void Terminal::draw_cursor()
 	const uint32_t py = static_cast<uint32_t>(origin_y_px + cursor_row * gui::FONT_HEIGHT);
 
 	const uint32_t caret_color = framebuffer::pack_color(240, 240, 255);
-	framebuffer::fill_rect(px, py, 2, gui::FONT_HEIGHT, caret_color);
+	framebuffer::fill_rect(px,
+						   py,
+						   2,
+						   gui::FONT_HEIGHT,
+						   caret_color,
+						   framebuffer::BufferTarget::Display);
 	cursor_active = true;
 }
 
@@ -163,6 +173,7 @@ void Terminal::update_cursor()
 	if (framebuffer_mode)
 	{
 		erase_cursor();
+		framebuffer::present();
 		cursor_row = row;
 		cursor_column = column;
 		draw_cursor();
@@ -487,6 +498,11 @@ void Terminal::redraw_all()
 
 	// Restore cursor overlay after full redraw.
 	cursor_active = false;
+
+	if (framebuffer_mode)
+	{
+		framebuffer::present();
+	}
 }
 
 uint32_t Terminal::vga_color_to_rgb(uint8_t vga_color_value) const
