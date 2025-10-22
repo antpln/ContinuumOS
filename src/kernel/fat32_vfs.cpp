@@ -132,7 +132,7 @@ static int fat32_vfs_readdir(vfs_mount_t* mount, const char* path, vfs_dirent_t*
         if (fat32_lookup_path(target_path, &dir_info, NULL, NULL, NULL) != 0) {
             error("[FAT32-VFS] Directory not found: %s", target_path);
             kfree(fat32_entries);
-            return VFS_ERROR;
+            return VFS_NOT_FOUND;
         }
 
         if (!(dir_info.attributes & FAT32_ATTR_DIRECTORY)) {
@@ -154,21 +154,8 @@ static int fat32_vfs_readdir(vfs_mount_t* mount, const char* path, vfs_dirent_t*
 
     int out = 0;
 
-    if (max_entries > 0) {
-        strncpy(entries[out].name, ".", VFS_MAX_NAME - 1);
-        entries[out].name[VFS_MAX_NAME - 1] = '\0';
-        entries[out].type = VFS_TYPE_DIRECTORY;
-        entries[out].size = 0;
-        out++;
-    }
-
-    if (out < max_entries) {
-        strncpy(entries[out].name, "..", VFS_MAX_NAME - 1);
-        entries[out].name[VFS_MAX_NAME - 1] = '\0';
-        entries[out].type = VFS_TYPE_DIRECTORY;
-        entries[out].size = 0;
-        out++;
-    }
+    // Don't add . and .. entries - these are handled by the VFS layer and shell navigation
+    // Only list actual directory contents
 
     for (int i = 0; i < count && out < max_entries; i++) {
         strncpy(entries[out].name, fat32_entries[i].filename, VFS_MAX_NAME - 1);
@@ -180,7 +167,7 @@ static int fat32_vfs_readdir(vfs_mount_t* mount, const char* path, vfs_dirent_t*
     }
 
     kfree(fat32_entries);
-    success("[FAT32-VFS] Found %d entries in FAT32 directory", out);
+    debug("[FAT32-VFS] Found %d entries in FAT32 directory", out);
     return out;
 }
 
