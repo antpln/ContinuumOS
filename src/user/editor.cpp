@@ -99,7 +99,8 @@ void Editor::start(const char* path) {
 
     if (this->path[0]) {
         vfs_file_t file;
-        if (vfs_open(this->path, &file) == VFS_SUCCESS) {
+        int open_res = vfs_open(this->path, &file);
+        if (open_res == VFS_SUCCESS) {
             char read_buf[128];
             char line_buf[EDITOR_LINE_LENGTH];
             int line_len = 0;
@@ -137,6 +138,13 @@ void Editor::start(const char* path) {
             }
 
             vfs_close(&file);
+        } else if (open_res == VFS_NOT_FOUND) {
+            // Try to create the file if it doesn't exist
+            if (vfs_create(this->path) == VFS_SUCCESS) {
+                // File created, start with empty buffer
+            } else {
+                set_status_message("Could not create file");
+            }
         }
     }
 
