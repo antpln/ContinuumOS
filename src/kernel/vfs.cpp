@@ -1,5 +1,4 @@
 #include "kernel/vfs.h"
-#include "kernel/fat32.h"
 #include "kernel/debug.h"
 #include <stdio.h>
 #include <string.h>
@@ -90,15 +89,16 @@ int vfs_unmount(const char* mountpoint) {
                 }
             }
             
-            // Call filesystem-specific unmount for FAT32
-            if (mounts[i].fs_type == VFS_FS_FAT32) {
-                int result = fat32_unmount();
+            if (mounts[i].ops && mounts[i].ops->unmount) {
+                int result = mounts[i].ops->unmount(&mounts[i]);
                 if (result != 0) {
-                    error("[VFS] Warning: FAT32 unmount returned error %d", result);
+                    error("[VFS] Warning: filesystem unmount returned error %d", result);
                 }
             }
             
             mounts[i].mounted = 0;
+            mounts[i].ops = NULL;
+            mounts[i].fs_data = NULL;
             success("[VFS] Successfully unmounted %s", mountpoint);
             return VFS_SUCCESS;
         }
@@ -372,7 +372,66 @@ int vfs_readdir(const char* path, vfs_dirent_t* entries, int max_entries) {
         return VFS_ERROR;
     }
     
-    return mount->ops->readdir(mount, relative_path, entries, max_entries);
+    // Get entries from the underlying filesystem
+    int count = mount->ops->readdir(mount, relative_path, entries, max_entries);
+    if (count < 0) {
+        return count;
+    }
+    
+    // Add mount points that are subdirectories of this path
+    char normalized_path[VFS_MAX_PATH];
+    if (vfs_normalize_path(path, normalized_path) != VFS_SUCCESS) {
+        return count; // Return what we have so far
+    }
+    
+    size_t path_len = strlen(normalized_path);
+    if (path_len > 0 && normalized_path[path_len - 1] != '/') {
+        strcat(normalized_path, "/");
+        path_len++;
+    }
+    
+    for (int i = 0; i < VFS_MAX_MOUNTS && count < max_entries; i++) {
+        if (mounts[i].mounted) {
+            const char* mountpoint = mounts[i].mountpoint;
+            
+            // Skip the mount we're currently listing
+            if (strcmp(mountpoint, normalized_path) == 0 || 
+                (path_len == 1 && strcmp(mountpoint, "/") == 0)) {
+                continue;
+            }
+            
+            // Check if this mountpoint is a direct child of the current path
+            if (strncmp(mountpoint, normalized_path, path_len) == 0) {
+                const char* remaining = mountpoint + path_len;
+                
+                // Find the next slash - this should be a direct child
+                char* next_slash = strchr(remaining, '/');
+                if (next_slash == NULL) {
+                    // This is a direct child directory
+                    bool already_exists = false;
+                    
+                    // Check if we already have this entry from the filesystem
+                    for (int j = 0; j < count; j++) {
+                        if (strcmp(entries[j].name, remaining) == 0) {
+                            already_exists = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!already_exists) {
+                        strncpy(entries[count].name, remaining, VFS_MAX_NAME - 1);
+                        entries[count].name[VFS_MAX_NAME - 1] = '\0';
+                        entries[count].type = VFS_TYPE_DIRECTORY;
+                        entries[count].size = 0;
+                        count++;
+                        debug("[VFS] Added mount point %s to directory listing", remaining);
+                    }
+                }
+            }
+        }
+    }
+    
+    return count;
 }
 
 int vfs_mkdir(const char* path) {

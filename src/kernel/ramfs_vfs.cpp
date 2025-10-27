@@ -10,18 +10,18 @@
 static int ramfs_vfs_open(vfs_mount_t* mount, const char* path, vfs_file_t* file) {
     (void)mount; // Unused for RamFS
     
-    debug("[RAMFS-VFS] Opening file: %s\n", path);
+    debug("[RAMFS-VFS] Opening file: %s", path);
     
     FSNode* node = fs_find_by_path(path);
     if (!node) {
-        error("[RAMFS-VFS] Node not found for path: %s\n", path);
+        error("[RAMFS-VFS] Node not found for path: %s", path);
         return VFS_NOT_FOUND;
     }
     
-    debug("[RAMFS-VFS] Found node: %s, type=%d\n", node->name, node->type);
+    debug("[RAMFS-VFS] Found node: %s, type=%d", node->name, node->type);
     
     if (node->type != FS_FILE) {
-        error("[RAMFS-VFS] Node is not a file, type=%d\n", node->type);
+        error("[RAMFS-VFS] Node is not a file, type=%d", node->type);
         return VFS_ERROR;
     }
     
@@ -83,7 +83,7 @@ static int ramfs_vfs_write(vfs_file_t* file, const void* buffer, size_t size) {
         }
         
         if (!new_data) {
-            error("[RAMFS-VFS] Failed to allocate memory for write\n");
+            error("[RAMFS-VFS] Failed to allocate memory for write");
             return VFS_ERROR;
         }
         node->data = new_data;
@@ -94,7 +94,7 @@ static int ramfs_vfs_write(vfs_file_t* file, const void* buffer, size_t size) {
     memcpy(node->data + file->position, buffer, size);
     file->position += size;
     
-    debug("[RAMFS-VFS] Wrote %u bytes at position %u\n", size, file->position - size);
+    debug("[RAMFS-VFS] Wrote %u bytes at position %u", size, file->position - size);
     return size;
 }
 
@@ -110,13 +110,13 @@ static int ramfs_vfs_seek(vfs_file_t* file, uint32_t position) {
     
     // Allow seeking beyond file size (for writing)
     file->position = position;
-    debug("[RAMFS-VFS] Seeked to position %u\n", position);
+    debug("[RAMFS-VFS] Seeked to position %u", position);
     return VFS_SUCCESS;
 }
 
 static void ramfs_vfs_close(vfs_file_t* file) {
     if (file && file->in_use) {
-        debug("[RAMFS-VFS] Closing file\n");
+        debug("[RAMFS-VFS] Closing file");
         file->in_use = 0;
         file->fs_handle = 0;
         file->position = 0;
@@ -126,16 +126,16 @@ static void ramfs_vfs_close(vfs_file_t* file) {
 static int ramfs_vfs_readdir(vfs_mount_t* mount, const char* path, vfs_dirent_t* entries, int max_entries) {
     (void)mount; // Unused for RamFS
     
-    debug("[RAMFS-VFS] Reading directory: %s\n", path);
+    debug("[RAMFS-VFS] Reading directory: %s", path);
     
     FSNode* dir = fs_find_by_path(path);
     if (!dir) {
-        error("[RAMFS-VFS] Directory not found: %s\n", path);
+        error("[RAMFS-VFS] Directory not found: %s", path);
         return VFS_NOT_FOUND;
     }
     
     if (dir->type != FS_DIRECTORY) {
-        error("[RAMFS-VFS] Path is not a directory: %s\n", path);
+        error("[RAMFS-VFS] Path is not a directory: %s", path);
         return VFS_ERROR;
     }
     
@@ -157,36 +157,36 @@ static int ramfs_vfs_readdir(vfs_mount_t* mount, const char* path, vfs_dirent_t*
         }
     }
     
-    debug("[RAMFS-VFS] Found %d entries in directory\n", count);
+    debug("[RAMFS-VFS] Found %d entries in directory", count);
     return count;
 }
 
 static int ramfs_vfs_mkdir(vfs_mount_t* mount, const char* path) {
     (void)mount; // Unused for RamFS
     
-    debug("[RAMFS-VFS] Creating directory: %s\n", path);
+    debug("[RAMFS-VFS] Creating directory: %s", path);
     
     FSNode* node = fs_mkdir(path);
     if (!node) {
-        error("[RAMFS-VFS] Failed to create directory: %s\n", path);
+        error("[RAMFS-VFS] Failed to create directory: %s", path);
         return VFS_ERROR;
     }
     
-    success("[RAMFS-VFS] Successfully created directory: %s\n", path);
+    success("[RAMFS-VFS] Successfully created directory: %s", path);
     return VFS_SUCCESS;
 }
 
 static int ramfs_vfs_rmdir(vfs_mount_t* mount, const char* path) {
     (void)mount; // Unused for RamFS
     
-    debug("[RAMFS-VFS] Removing directory: %s\n", path);
+    debug("[RAMFS-VFS] Removing directory: %s", path);
     
     int result = fs_rmdir(path);
     if (result == 0) {
-        success("[RAMFS-VFS] Successfully removed directory: %s\n", path);
+        success("[RAMFS-VFS] Successfully removed directory: %s", path);
         return VFS_SUCCESS;
     } else {
-        error("[RAMFS-VFS] Failed to remove directory: %s\n", path);
+        error("[RAMFS-VFS] Failed to remove directory: %s", path);
         return VFS_ERROR;
     }
 }
@@ -194,16 +194,16 @@ static int ramfs_vfs_rmdir(vfs_mount_t* mount, const char* path) {
 static int ramfs_vfs_create(vfs_mount_t* mount, const char* path) {
     (void)mount; // Unused for RamFS
     
-    debug("[RAMFS-VFS] Creating file: %s\n", path);
+    debug("[RAMFS-VFS] Creating file: %s", path);
     
     // Use the existing fs_touch function which should work correctly
     FSNode* node = fs_touch(path);
     if (!node) {
-        error("[RAMFS-VFS] fs_touch returned NULL for: %s\n", path);
+        error("[RAMFS-VFS] fs_touch returned NULL for: %s", path);
         return VFS_ERROR;
     }
     
-    debug("[RAMFS-VFS] fs_touch created node with type=%d (should be %d)\n", node->type, FS_FILE);
+    debug("[RAMFS-VFS] fs_touch created node with type=%d (should be %d)", node->type, FS_FILE);
     
     return VFS_SUCCESS;
 }
@@ -211,14 +211,14 @@ static int ramfs_vfs_create(vfs_mount_t* mount, const char* path) {
 static int ramfs_vfs_remove(vfs_mount_t* mount, const char* path) {
     (void)mount; // Unused for RamFS
     
-    debug("[RAMFS-VFS] Removing file: %s\n", path);
+    debug("[RAMFS-VFS] Removing file: %s", path);
     
     int result = fs_remove(path);
     if (result == 0) {
         success("[RAMFS-VFS] Successfully removed file: %s\n", path);
         return VFS_SUCCESS;
     } else {
-        error("[RAMFS-VFS] Failed to remove file: %s\n", path);
+        error("[RAMFS-VFS] Failed to remove file: %s", path);
         return VFS_ERROR;
     }
 }
@@ -246,6 +246,7 @@ static vfs_operations_t ramfs_vfs_ops = {
     .write = ramfs_vfs_write,
     .seek = ramfs_vfs_seek,
     .close = ramfs_vfs_close,
+    .unmount = NULL,
     .readdir = ramfs_vfs_readdir,
     .mkdir = ramfs_vfs_mkdir,
     .rmdir = ramfs_vfs_rmdir,
@@ -261,6 +262,6 @@ vfs_operations_t* ramfs_get_vfs_ops(void) {
 
 // Function to mount RamFS via VFS
 int ramfs_vfs_mount(const char* mountpoint) {
-    debug("[RAMFS-VFS] Mounting RamFS at %s\n", mountpoint);
+    debug("[RAMFS-VFS] Mounting RamFS at %s", mountpoint);
     return vfs_mount(mountpoint, VFS_FS_RAMFS, 0, &ramfs_vfs_ops, NULL);
 }

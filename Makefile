@@ -56,7 +56,7 @@ KERNEL_ELF = kernel/kernel.bin
 QEMU = qemu-system-i386
 QEMU_FLAGS = -kernel $(KERNEL_ELF) -serial stdio
 
-.PHONY: all clean run directories iso debug runiso release runrelease apps
+.PHONY: all clean clean-all resetimg run directories iso debug runiso release runrelease rundebug apps
 
 all: directories $(KERNEL_ELF) apps
 
@@ -150,6 +150,9 @@ rundebug :
 	$(MAKE) 
 	$(QEMU) $(QEMU_FLAGS) -drive file=test_fat32.img,format=raw,if=ide
 
+run: $(KERNEL_ELF) test_fat32.img
+	$(QEMU) $(QEMU_FLAGS) -drive file=test_fat32.img,format=raw,if=ide
+
 runrelease :
 	$(MAKE) clean
 	$(MAKE) EXTRA_CFLAGS="-UDEBUG -UTEST"
@@ -166,8 +169,11 @@ clean:
 	rm -f $(KERNEL_DEST)/kernel.bin
 	rm -f $(KERNEL_DEST)/kernel2.bin
 	rm -f $(APPS_DIR)/*.app
-clean-all: clean
+
+resetimg:
 	rm -f test_fat32.img
+
+clean-all: clean resetimg
 	rm -f fat32_template.img
 
 # Create test FAT32 disk image

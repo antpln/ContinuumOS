@@ -21,3 +21,4 @@ isodir/
 *.tmp
 *.swp
 *~
+test_fat32.img
