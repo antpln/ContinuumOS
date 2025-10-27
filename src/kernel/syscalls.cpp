@@ -5,10 +5,13 @@
 #include "kernel/scheduler.h"
 #include "kernel/gui.h"
 #include "kernel/vga.h"
+#include "kernel/graphics.h"
 #include "kernel/terminal_windows.h"
 #include "kernel/framebuffer.h"
 #include "kernel/serial.h"
 #include "kernel/pci.h"
+#include "kernel/heap.h"
+#include "kernel/vfs.h"
 #include <sys/gui.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -117,6 +120,154 @@ char sys_getchar() {
         sys_yield();
     }
     return keyboard_buffer_pop();
+}
+
+void* sys_alloc(size_t size) {
+    return kmalloc(size);
+}
+
+void sys_free(void* ptr) {
+    if (ptr) {
+        kfree(ptr);
+    }
+}
+
+void* sys_realloc(void* ptr, size_t size) {
+    return krealloc(ptr, size);
+}
+
+int sys_vfs_open(const char* path, vfs_file_t* file) {
+    return vfs_open(path, file);
+}
+
+int sys_vfs_read(vfs_file_t* file, void* buffer, size_t size) {
+    return vfs_read(file, buffer, size);
+}
+
+int sys_vfs_write(vfs_file_t* file, const void* buffer, size_t size) {
+    return vfs_write(file, buffer, size);
+}
+
+int sys_vfs_seek(vfs_file_t* file, uint32_t position) {
+    return vfs_seek(file, position);
+}
+
+void sys_vfs_close(vfs_file_t* file) {
+    vfs_close(file);
+}
+
+int sys_vfs_create(const char* path) {
+    return vfs_create(path);
+}
+
+int sys_vfs_remove(const char* path) {
+    return vfs_remove(path);
+}
+
+int sys_vfs_stat(const char* path, vfs_dirent_t* info) {
+    return vfs_stat(path, info);
+}
+
+int sys_vfs_mkdir(const char* path) {
+    return vfs_mkdir(path);
+}
+
+int sys_vfs_rmdir(const char* path) {
+    return vfs_rmdir(path);
+}
+
+int sys_vfs_readdir(const char* path, vfs_dirent_t* entries, int max_entries) {
+    return vfs_readdir(path, entries, max_entries);
+}
+
+int sys_vfs_normalize_path(const char* path, char* normalized_path) {
+    return vfs_normalize_path(path, normalized_path);
+}
+
+void sys_graphics_ensure_window(void) {
+    graphics::ensure_window();
+}
+
+void sys_graphics_put_char(size_t column, size_t row, char ch, uint8_t color) {
+    graphics::put_char(column, row, ch, color);
+}
+
+void sys_graphics_present(void) {
+    graphics::present();
+}
+
+void sys_graphics_set_cursor(size_t row, size_t column, bool active) {
+    graphics::set_cursor(row, column, active);
+}
+
+bool sys_graphics_get_cursor(size_t* row, size_t* column) {
+    if (!row || !column) {
+        return false;
+    }
+    size_t local_row = 0;
+    size_t local_col = 0;
+    bool ok = graphics::get_cursor(local_row, local_col);
+    if (ok) {
+        *row = local_row;
+        *column = local_col;
+    }
+    return ok;
+}
+
+size_t sys_graphics_columns(void) {
+    return graphics::columns();
+}
+
+size_t sys_graphics_rows(void) {
+    return graphics::rows();
+}
+
+bool sys_framebuffer_is_available(void) {
+    return framebuffer::is_available();
+}
+
+static Process* find_process_by_pid(int pid) {
+    if (pid <= 0) {
+        return nullptr;
+    }
+    for (int i = 0; i < MAX_PROCESSES; ++i) {
+        Process* proc = process_table[i];
+        if (proc && proc->pid == pid) {
+            return proc;
+        }
+    }
+    return nullptr;
+}
+
+int sys_scheduler_getpid(void) {
+    Process* proc = scheduler_current_process();
+    return proc ? proc->pid : -1;
+}
+
+int sys_scheduler_set_foreground(int pid) {
+    Process* target = find_process_by_pid(pid);
+    if (!target) {
+        return -1;
+    }
+    scheduler_set_foreground(target);
+    return 0;
+}
+
+int sys_scheduler_get_foreground(void) {
+    Process* proc = scheduler_get_foreground();
+    return proc ? proc->pid : -1;
+}
+
+uint8_t sys_terminal_make_color(vga_color foreground, vga_color background) {
+    return terminal.make_color(foreground, background);
+}
+
+void sys_terminal_put_at(char ch, uint8_t color, size_t column, size_t row) {
+    terminal.put_at(ch, color, column, row);
+}
+
+void sys_terminal_set_cursor(size_t row, size_t column) {
+    terminal.set_cursor(row, column);
 }
 
 // Syscall to register keyboard handler for current process
@@ -244,6 +395,93 @@ extern "C" void syscall_dispatch(registers_t* regs) {
             break;
         case 0x89: // SYSCALL_PCI_UNREGISTER_LISTENER
             sys_pci_unregister_listener();
+            break;
+        case 0x8A: // SYSCALL_ALLOC
+            regs->eax = (uint32_t)sys_alloc((size_t)arg1);
+            break;
+        case 0x8B: // SYSCALL_FREE
+            sys_free((void*)arg1);
+            break;
+        case 0x8C: // SYSCALL_REALLOC
+            regs->eax = (uint32_t)sys_realloc((void*)arg1, (size_t)arg2);
+            break;
+        case 0x8D: // SYSCALL_VFS_OPEN
+            regs->eax = (uint32_t)sys_vfs_open((const char*)arg1, (vfs_file_t*)arg2);
+            break;
+        case 0x8E: // SYSCALL_VFS_READ
+            regs->eax = (uint32_t)sys_vfs_read((vfs_file_t*)arg1, (void*)arg2, (size_t)arg3);
+            break;
+        case 0x8F: // SYSCALL_VFS_WRITE
+            regs->eax = (uint32_t)sys_vfs_write((vfs_file_t*)arg1, (const void*)arg2, (size_t)arg3);
+            break;
+        case 0x90: // SYSCALL_VFS_CLOSE
+            sys_vfs_close((vfs_file_t*)arg1);
+            break;
+        case 0x91: // SYSCALL_VFS_SEEK
+            regs->eax = (uint32_t)sys_vfs_seek((vfs_file_t*)arg1, (uint32_t)arg2);
+            break;
+        case 0x92: // SYSCALL_VFS_CREATE
+            regs->eax = (uint32_t)sys_vfs_create((const char*)arg1);
+            break;
+        case 0x93: // SYSCALL_VFS_REMOVE
+            regs->eax = (uint32_t)sys_vfs_remove((const char*)arg1);
+            break;
+        case 0x94: // SYSCALL_VFS_STAT
+            regs->eax = (uint32_t)sys_vfs_stat((const char*)arg1, (vfs_dirent_t*)arg2);
+            break;
+        case 0x95: // SYSCALL_VFS_MKDIR
+            regs->eax = (uint32_t)sys_vfs_mkdir((const char*)arg1);
+            break;
+        case 0x96: // SYSCALL_VFS_RMDIR
+            regs->eax = (uint32_t)sys_vfs_rmdir((const char*)arg1);
+            break;
+        case 0x97: // SYSCALL_VFS_READDIR
+            regs->eax = (uint32_t)sys_vfs_readdir((const char*)arg1, (vfs_dirent_t*)arg2, (int)arg3);
+            break;
+        case 0x98: // SYSCALL_VFS_NORMALIZE_PATH
+            regs->eax = (uint32_t)sys_vfs_normalize_path((const char*)arg1, (char*)arg2);
+            break;
+        case 0x99: // SYSCALL_GRAPHICS_ENSURE_WINDOW
+            sys_graphics_ensure_window();
+            break;
+        case 0x9A: // SYSCALL_GRAPHICS_PUT_CHAR
+            sys_graphics_put_char((size_t)arg1, (size_t)arg2, (char)arg3, (uint8_t)arg4);
+            break;
+        case 0x9B: // SYSCALL_GRAPHICS_PRESENT
+            sys_graphics_present();
+            break;
+        case 0x9C: // SYSCALL_GRAPHICS_SET_CURSOR
+            sys_graphics_set_cursor((size_t)arg1, (size_t)arg2, arg3 != 0);
+            break;
+        case 0x9D: // SYSCALL_GRAPHICS_GET_CURSOR
+            regs->eax = sys_graphics_get_cursor((size_t*)arg1, (size_t*)arg2);
+            break;
+        case 0x9E: // SYSCALL_GRAPHICS_COLUMNS
+            regs->eax = (uint32_t)sys_graphics_columns();
+            break;
+        case 0x9F: // SYSCALL_GRAPHICS_ROWS
+            regs->eax = (uint32_t)sys_graphics_rows();
+            break;
+        case 0xA0: // SYSCALL_FRAMEBUFFER_AVAILABLE
+            regs->eax = sys_framebuffer_is_available();
+            break;
+        case 0xA1: // SYSCALL_SCHED_GETPID
+            regs->eax = (uint32_t)sys_scheduler_getpid();
+            break;
+        case 0xA2: // SYSCALL_SCHED_SET_FOREGROUND
+            regs->eax = (uint32_t)sys_scheduler_set_foreground((int)arg1);
+            break;
+        case 0xA3: // SYSCALL_SCHED_GET_FOREGROUND
+            regs->eax = (uint32_t)sys_scheduler_get_foreground();
+            break;
+        case 0xA4: // SYSCALL_TERMINAL_MAKE_COLOR
+            regs->eax = (uint32_t)sys_terminal_make_color((vga_color)arg1, (vga_color)arg2);
+            break;
+        case 0xA5: // SYSCALL_TERMINAL_PUT_AT
+            sys_terminal_put_at((char)arg1, (uint8_t)arg2, (size_t)arg3, (size_t)arg4);
+            break;
+        case 0xA6: // SYSCALL_TERMINAL_SET_CURSOR
+            sys_terminal_set_cursor((size_t)arg1, (size_t)arg2);
             break;
         // ...other syscalls...
         default:

@@ -3,7 +3,6 @@
 
 #include <kernel/keyboard.h>
 #include <kernel/vfs.h>
-#include <kernel/process.h>
 
 #define EDITOR_MAX_LINES    128
 #define EDITOR_LINE_LENGTH  128
@@ -52,7 +51,6 @@ private:
     bool    active;
 
     char status_message[EDITOR_LINE_LENGTH]; // status bar message
-    Process* owner_proc = nullptr;
 };
 
 void editor_start(const char* path);

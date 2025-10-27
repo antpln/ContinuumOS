@@ -11,6 +11,8 @@ BOOT_DIR = boot
 KERNEL_DIR = $(SRC_DIR)/kernel
 KERNEL_DEST = ./kernel
 LIBC_DIR = libc
+USER_SRC_DIR = $(SRC_DIR)/user
+APPS_DIR = apps
 
 # Create kernel directory if it doesn't exist
 $(shell mkdir -p $(KERNEL_DEST))
@@ -24,12 +26,13 @@ CXXFLAGS += $(EXTRA_CFLAGS)
 LDFLAGS = -ffreestanding -O2 -nostdlib
 
 # Source files (exclude toolchain build directories)
-CSOURCES = $(shell find $(SRC_DIR) -name '*.c' ! -path "*/binutils-*" ! -path "*/gcc-*" ! -path "*/build-*")
-CPPSOURCES = $(shell find $(SRC_DIR) -name '*.cpp' ! -path "*/binutils-*" ! -path "*/gcc-*" ! -path "*/build-*")
+CSOURCES = $(shell find $(SRC_DIR) -name '*.c' ! -path "*/binutils-*" ! -path "*/gcc-*" ! -path "*/build-*" ! -path "$(USER_SRC_DIR)/*")
+CPPSOURCES = $(shell find $(SRC_DIR) -name '*.cpp' ! -path "*/binutils-*" ! -path "*/gcc-*" ! -path "*/build-*" ! -path "$(USER_SRC_DIR)/*")
 ASMSOURCES = $(shell find $(BOOT_DIR) -name '*.s')
 KERNEL_ASMSOURCES = $(shell find $(KERNEL_DIR) -name '*.s')
 LIBC_CSOURCES = $(shell find $(LIBC_DIR) -type f -name '*.c')
 LIBC_CPPSOURCES = $(shell find $(LIBC_DIR) -type f -name '*.cpp')
+USER_SOURCES = $(wildcard $(USER_SRC_DIR)/*.cpp)
 
 # Object files
 KERNEL_OBJS = $(patsubst $(KERNEL_DIR)/%.s,$(BUILD_DIR)/kernel/%.o,$(KERNEL_ASMSOURCES))
@@ -38,8 +41,13 @@ C_OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(CSOURCES))
 CPP_OBJS = $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(CPPSOURCES))
 LIBC_C_OBJS = $(patsubst $(LIBC_DIR)/%,$(BUILD_DIR)/libc/%,$(LIBC_CSOURCES:.c=.o))
 LIBC_CPP_OBJS = $(patsubst $(LIBC_DIR)/%,$(BUILD_DIR)/libc/%,$(LIBC_CPPSOURCES:.cpp=.o))
+LIBC_USER_C_OBJS = $(patsubst $(LIBC_DIR)/%,$(BUILD_DIR)/user_libc/%,$(LIBC_CSOURCES:.c=.o))
+LIBC_USER_CPP_OBJS = $(patsubst $(LIBC_DIR)/%,$(BUILD_DIR)/user_libc/%,$(LIBC_CPPSOURCES:.cpp=.o))
+USER_APP_OBJS = $(patsubst $(USER_SRC_DIR)/%.cpp,$(BUILD_DIR)/user_apps/%.o,$(USER_SOURCES))
+USER_APP_MODULES = $(patsubst $(USER_SRC_DIR)/%.cpp,$(APPS_DIR)/%.app,$(USER_SOURCES))
+APP_EMBED_OBJECTS = $(patsubst $(APPS_DIR)/%.app,$(BUILD_DIR)/app_bundles/%_app.o,$(USER_APP_MODULES))
 
-OBJECTS = $(sort $(BOOT_OBJS) $(C_OBJS) $(CPP_OBJS) $(KERNEL_OBJS) $(LIBC_C_OBJS) $(LIBC_CPP_OBJS))
+OBJECTS = $(sort $(BOOT_OBJS) $(C_OBJS) $(CPP_OBJS) $(KERNEL_OBJS) $(LIBC_C_OBJS) $(LIBC_CPP_OBJS) $(APP_EMBED_OBJECTS))
 
 # Output files
 KERNEL_ELF = kernel/kernel.bin
@@ -48,9 +56,9 @@ KERNEL_ELF = kernel/kernel.bin
 QEMU = qemu-system-i386
 QEMU_FLAGS = -kernel $(KERNEL_ELF) -serial stdio
 
-.PHONY: all clean run directories iso debug runiso release runrelease
+.PHONY: all clean run directories iso debug runiso release runrelease apps
 
-all: directories $(KERNEL_ELF)
+all: directories $(KERNEL_ELF) apps
 
 directories:
 	@mkdir -p $(BUILD_DIR)
@@ -58,6 +66,11 @@ directories:
 	@mkdir -p $(BUILD_DIR)/boot
 	@mkdir -p $(BUILD_DIR)/libc
 	@mkdir -p $(BUILD_DIR)/libc/stdlib
+	@mkdir -p $(BUILD_DIR)/user_libc
+	@mkdir -p $(BUILD_DIR)/user_libc/stdlib
+	@mkdir -p $(BUILD_DIR)/user_apps
+	@mkdir -p $(BUILD_DIR)/app_bundles
+	@mkdir -p $(APPS_DIR)
 
 $(KERNEL_ELF): $(OBJECTS)
 	$(CXX) -T linker.ld -o $(KERNEL_DEST)/kernel.bin $(LDFLAGS) $(OBJECTS) -lgcc
@@ -89,6 +102,30 @@ $(BUILD_DIR)/libc/%.o: $(LIBC_DIR)/%.c
 	@mkdir -p $(dir $@)
 	@echo "Compiling C: $<"
 	$(CC) -c $< -o $@ $(CFLAGS)
+
+$(BUILD_DIR)/user_libc/%.o: $(LIBC_DIR)/%.cpp
+	@mkdir -p $(dir $@)
+	@echo "Compiling user C++: $<"
+	$(CXX) -c $< -o $@ $(CXXFLAGS) -DUSER_APP_BUILD
+
+$(BUILD_DIR)/user_libc/%.o: $(LIBC_DIR)/%.c
+	@mkdir -p $(dir $@)
+	@echo "Compiling user C: $<"
+	$(CC) -c $< -o $@ $(CFLAGS) -DUSER_APP_BUILD
+
+$(BUILD_DIR)/user_apps/%.o: $(USER_SRC_DIR)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -c $< -o $@ $(CXXFLAGS) -DUSER_APP_BUILD
+
+$(APPS_DIR)/%.app: $(BUILD_DIR)/user_apps/%.o $(LIBC_USER_C_OBJS) $(LIBC_USER_CPP_OBJS)
+	@mkdir -p $(dir $@)
+	i686-elf-ld -r $^ -o $@
+
+$(BUILD_DIR)/app_bundles/%_app.o: $(APPS_DIR)/%.app
+	@mkdir -p $(dir $@)
+	i686-elf-objcopy -I binary -O elf32-i386 -B i386 $< $@
+
+apps: $(USER_APP_MODULES)
 
 iso: $(KERNEL_ELF)
 	mkdir -p isodir/boot/grub
@@ -128,6 +165,7 @@ clean:
 	rm -f kernel.iso
 	rm -f $(KERNEL_DEST)/kernel.bin
 	rm -f $(KERNEL_DEST)/kernel2.bin
+	rm -f $(APPS_DIR)/*.app
 clean-all: clean
 	rm -f test_fat32.img
 	rm -f fat32_template.img

@@ -69,6 +69,16 @@ make all
 
 This will create the kernel binary at `kernel/kernel.bin`.
 
+`make all` also builds the user-space application images into `apps/*.app`. If you make
+changes to the user programs only, you can rebuild them quickly with:
+
+```sh
+make apps
+```
+
+The resulting binaries are embedded into the kernel image and published inside the
+virtual filesystem at boot.
+
 ### Running
 
 To run the OS in QEMU with FAT32 disk support:
@@ -90,6 +100,24 @@ make runiso
 ```
 
 The ISO image will be created as `kernel.iso`.
+
+### User Applications
+
+ContinuumOS now loads user programs from relocatable application images stored under
+`/apps` in the virtual filesystem. The build embeds `apps/*.app` into the kernel and the
+boot sequence installs them into RAMFS so they are available immediately. The shell's
+`edit` command is the first consumer of this toolchain: instead of linking the editor
+directly into the kernel it launches the `/apps/editor.app` binary through the new
+application loader.
+
+Sample applications shipped by default:
+- `hello` – prints a greeting from user space and exits.
+- `edit` – launches the text editor (`edit <path>`).
+
+User-space code links against the lightweight libc wrappers located in `libc/include/sys/`
+to invoke kernel services. Recent additions expose memory management (`malloc`, `free`,
+`realloc`), VFS helpers, graphics/terminal primitives, and scheduler controls entirely via
+syscalls, so user applications no longer depend on direct kernel symbol exports.
 
 ### Cleaning
 

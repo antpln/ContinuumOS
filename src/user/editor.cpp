@@ -1,18 +1,15 @@
 #include <kernel/editor.h>
 #include <stdio.h>
 #include <string.h>
-#include <kernel/heap.h>
+#include <stdlib.h>
 #include <kernel/vga.h>
-#include <kernel/graphics.h>
-#include <kernel/framebuffer.h>
-#include <kernel/vfs.h>
-#include <kernel/scheduler.h>
-#include <kernel/process.h>
 #include <kernel/keyboard.h>
 #include <process.h>
 #include <utils.h>
-
-extern Terminal terminal;
+#include <sys/graphics.h>
+#include <sys/terminal.h>
+#include <sys/vfs.h>
+#include <sys/scheduler.h>
 
 #define EDITOR_MAX_LINES        128
 #define EDITOR_LINE_LENGTH      128
@@ -47,24 +44,24 @@ static inline void copy_line(char* dst, const char* src) {
 }
 
 void Editor::put_cell(size_t x, size_t y, char ch, uint8_t color) {
-    if (owner_proc && framebuffer::is_available()) {
+    if (framebuffer::is_available()) {
         graphics::put_char(x, y, ch, color);
     } else {
-        terminal.put_at(ch, color, x, y);
+        terminal_put_at(ch, color, x, y);
     }
 }
 
 void Editor::present_window() {
-    if (owner_proc && framebuffer::is_available()) {
+    if (framebuffer::is_available()) {
         graphics::present();
     }
 }
 
 void Editor::update_cursor_visual(size_t row, size_t column, bool active) {
-    if (owner_proc && framebuffer::is_available()) {
+    if (framebuffer::is_available()) {
         graphics::set_cursor(row, column, active);
     } else if (active) {
-        terminal.set_cursor(row, column);
+        terminal_set_cursor(row, column);
     }
 }
 
@@ -72,8 +69,7 @@ void Editor::update_cursor_visual(size_t row, size_t column, bool active) {
 void Editor::start(const char* path) {
     active = true;
     status_message[0] = '\0';
-    owner_proc = scheduler_current_process();
-    if (owner_proc && framebuffer::is_available()) {
+    if (framebuffer::is_available()) {
         graphics::ensure_window();
     }
 
@@ -99,14 +95,14 @@ void Editor::start(const char* path) {
 
     if (this->path[0]) {
         vfs_file_t file;
-        int open_res = vfs_open(this->path, &file);
+        int open_res = vfs_user_open(this->path, &file);
         if (open_res == VFS_SUCCESS) {
             char read_buf[128];
             char line_buf[EDITOR_LINE_LENGTH];
             int line_len = 0;
             int bytes = 0;
 
-            while ((bytes = vfs_read(&file, read_buf, sizeof(read_buf))) > 0) {
+            while ((bytes = vfs_user_read(&file, read_buf, sizeof(read_buf))) > 0) {
                 for (int i = 0; i < bytes; ++i) {
                     char c = read_buf[i];
                     if (c == '\r') {
@@ -137,10 +133,10 @@ void Editor::start(const char* path) {
                 }
             }
 
-            vfs_close(&file);
+            vfs_user_close(&file);
         } else if (open_res == VFS_NOT_FOUND) {
             // Try to create the file if it doesn't exist
-            if (vfs_create(this->path) == VFS_SUCCESS) {
+            if (vfs_user_create(this->path) == VFS_SUCCESS) {
                 // File created, start with empty buffer
             } else {
                 set_status_message("Could not create file");
@@ -190,7 +186,7 @@ void Editor::exit(bool save) {
 
         char* data = nullptr;
         if (total > 0) {
-            data = (char*)kmalloc(total);
+            data = (char*)malloc(total);
         }
         if (total > 0 && !data) {
             printf("Memory allocation failed.\n");
@@ -211,47 +207,47 @@ void Editor::exit(bool save) {
             pos += 1;
         }
 
-        int remove_res = vfs_remove(path);
+        int remove_res = vfs_user_remove(path);
         if (remove_res != VFS_SUCCESS && remove_res != VFS_NOT_FOUND) {
             printf("Error: could not prepare file '%s'.\n", path);
-            if (data) kfree(data);
+            if (data) free(data);
             active = false;
             return;
         }
 
-        if (vfs_create(path) != VFS_SUCCESS) {
+        if (vfs_user_create(path) != VFS_SUCCESS) {
             // File may already exist; that's fine
         }
 
         vfs_file_t file;
-        if (vfs_open(path, &file) != VFS_SUCCESS) {
+        if (vfs_user_open(path, &file) != VFS_SUCCESS) {
             printf("Error: could not open file '%s'.\n", path);
-            if (data) kfree(data);
+            if (data) free(data);
             active = false;
             return;
         }
 
-        if (vfs_seek(&file, 0) != VFS_SUCCESS) {
+        if (vfs_user_seek(&file, 0) != VFS_SUCCESS) {
             printf("Error: could not seek file '%s'.\n", path);
-            vfs_close(&file);
-            if (data) kfree(data);
+            vfs_user_close(&file);
+            if (data) free(data);
             active = false;
             return;
         }
 
         if (total > 0 && data) {
-            int written = vfs_write(&file, data, total);
+            int written = vfs_user_write(&file, data, total);
             if (written < 0 || (size_t)written != total) {
                 printf("Error: failed to write file '%s'.\n", path);
-                vfs_close(&file);
-                if (data) kfree(data);
+                vfs_user_close(&file);
+                if (data) free(data);
                 active = false;
                 return;
             }
         }
 
-        vfs_close(&file);
-        if (data) kfree(data);
+        vfs_user_close(&file);
+        if (data) free(data);
         printf("File '%s' saved.\n", path);
     } else {
         printf("Edit aborted.\n");
@@ -260,7 +256,7 @@ void Editor::exit(bool save) {
     // Clear the status-bar row
     int y = static_cast<int>(Terminal::VGA_HEIGHT) - 1;
     const size_t width = Terminal::VGA_WIDTH;
-    const uint8_t fill_color = terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    const uint8_t fill_color = terminal_make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     update_cursor_visual(0, 0, false);
     for (size_t x = 0; x < width; ++x) {
         put_cell(x, static_cast<size_t>(y), ' ', fill_color);
@@ -278,7 +274,7 @@ void Editor::draw_line(const char* text, int y, bool is_active_line) {
     int max_content = static_cast<int>(width) - prefix_len;
     if (max_content < 0) max_content = 0;
 
-    const uint8_t prefix_color = terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    const uint8_t prefix_color = terminal_make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     for (int i = 0; i < prefix_len && i < static_cast<int>(width); ++i) {
         put_cell(static_cast<size_t>(i), static_cast<size_t>(y), prefix[i], prefix_color);
     }
@@ -296,12 +292,12 @@ void Editor::draw_line(const char* text, int y, bool is_active_line) {
         }
         const bool cursor_here = is_active_line && i == cursor_col;
         const uint8_t color = cursor_here
-                                  ? terminal.make_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE)
-                                  : terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+                                  ? terminal_make_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE)
+                                  : terminal_make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
         put_cell(x, static_cast<size_t>(y), c, color);
     }
 
-    const uint8_t fill_color = terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    const uint8_t fill_color = terminal_make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     for (size_t x = static_cast<size_t>(prefix_len + len); x < width; ++x) {
         put_cell(x, static_cast<size_t>(y), ' ', fill_color);
     }
@@ -348,7 +344,7 @@ void Editor::draw_status_bar() {
 
     int len = strlen(line);
     if (len > (int)width) len = (int)width;
-    const uint8_t bar_color = terminal.make_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE);
+    const uint8_t bar_color = terminal_make_color(VGA_COLOR_BLACK, VGA_COLOR_WHITE);
     for (int x = 0; x < static_cast<int>(width); ++x) {
         char c = (x < len) ? line[x] : ' ';
         put_cell(static_cast<size_t>(x), static_cast<size_t>(y), c, bar_color);
@@ -379,7 +375,7 @@ void Editor::render() {
         if (idx < line_count) {
             draw_line(buffer[idx], y, idx == cursor_line);
         } else {
-            const uint8_t fill_color = terminal.make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+            const uint8_t fill_color = terminal_make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
             for (size_t x = 0; x < width; ++x) {
                 put_cell(x, static_cast<size_t>(y), ' ', fill_color);
             }
@@ -538,9 +534,9 @@ void editor_handle_key(keyboard_event ke) {
 
 extern "C" void editor_entry() {
     printf("[editor] entry\n");
-    Process* proc = scheduler_current_process();
-    if (proc) {
-        scheduler_set_foreground(proc);
+    int pid = scheduler_getpid();
+    if (pid >= 0) {
+        scheduler_set_foreground(pid);
     }
 
     // Use the safe copied params

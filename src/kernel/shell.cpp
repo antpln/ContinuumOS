@@ -9,7 +9,7 @@
 #include <kernel/vga.h>      
 #include <kernel/shell.h>
 #include <kernel/pci.h>
-#include "editor_process.h"
+#include "kernel/app_loader.h"
 #include <kernel/process.h>
 #include <kernel/blockdev.h>
 #include <kernel/fat32.h>
@@ -750,10 +750,32 @@ void cmd_edit(const char* args) {
         return;
     }
 
-    editor_set_params(normalized);
-    Process* p = k_start_process("editor", editor_entry, 0, 8192);
+    AppLoadParams params{};
+    params.entry_symbol = "editor_entry";
+    params.init_symbol = "editor_set_params";
+    params.stack_size = 8192;
+
+    Process* p = app_load_and_start("/apps/editor.app", "editor", &params, normalized);
     if (!p) {
         printf("edit: failed to start editor process\n");
+        return;
+    }
+
+    scheduler_set_foreground(p);
+    shell_set_input_enabled(false);
+}
+
+// Launch the hello demo app
+void cmd_hello(const char* args) {
+    (void)args;
+
+    AppLoadParams params{};
+    params.entry_symbol = "hello_entry";
+    params.stack_size = 4096;
+
+    Process* p = app_load_and_start("/apps/hello.app", "hello", &params, nullptr);
+    if (!p) {
+        printf("hello: failed to start hello.app\n");
         return;
     }
 
@@ -929,6 +951,7 @@ shell_command_t commands[] = {
     { "uptime",   cmd_uptime,   "Show system uptime" },
     { "history",  cmd_history,  "Show command history" },
     { "edit",      cmd_edit,      "Edit a file" },
+    { "hello",     cmd_hello,     "Run the hello demo app" },
     { "lsblk",     cmd_lsblk,     "List block devices" },
     { "disktest",  cmd_disktest,  "Test disk reading" },
     { "mount",     cmd_mount,      "Mount filesystem" },

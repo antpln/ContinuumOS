@@ -1,5 +1,8 @@
 #include <stdio.h>
 #include <kernel/syscalls.h>
+#ifdef USER_APP_BUILD
+#include <sys/syscall.h>
+#endif
 #include <stdarg.h>
 #include <stdint.h>
 #include <string.h>
@@ -10,7 +13,11 @@ static void console_write(const char* data, size_t size)
     {
         return;
     }
+#ifdef USER_APP_BUILD
+    syscall_console_write(data, size);
+#else
     sys_console_write(data, size);
+#endif
 }
 
 static void console_write_string(const char* str)
