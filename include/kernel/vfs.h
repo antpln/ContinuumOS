@@ -55,7 +55,10 @@ typedef struct vfs_operations {
     int (*write)(vfs_file_t* file, const void* buffer, size_t size);
     int (*seek)(vfs_file_t* file, uint32_t position);
     void (*close)(vfs_file_t* file);
-    
+
+    // Lifecycle
+    int (*unmount)(struct vfs_mount* mount);
+
     // Directory operations
     int (*readdir)(struct vfs_mount* mount, const char* path, vfs_dirent_t* entries, int max_entries);
     int (*mkdir)(struct vfs_mount* mount, const char* path);

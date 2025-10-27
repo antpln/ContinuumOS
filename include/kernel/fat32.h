@@ -21,7 +21,7 @@
 #define FAT32_ATTR_LONG_NAME 0x0F
 
 // Maximum values
-#define FAT32_MAX_FILENAME   12
+#define FAT32_MAX_FILENAME   255
 #define FAT32_MAX_PATH       256
 #define FAT32_MAX_OPEN_FILES 16
 
@@ -73,6 +73,17 @@ typedef struct __attribute__((packed)) {
     uint32_t file_size;
 } fat32_dir_entry_t;
 
+typedef struct __attribute__((packed)) {
+    uint8_t  order;
+    uint16_t name1[5];
+    uint8_t  attributes;
+    uint8_t  type;
+    uint8_t  checksum;
+    uint16_t name2[6];
+    uint16_t first_cluster_low;
+    uint16_t name3[2];
+} fat32_lfn_entry_t;
+
 // Runtime structures
 typedef struct {
     uint8_t device_id;
@@ -102,7 +113,9 @@ typedef struct {
 } fat32_file_t;
 
 typedef struct {
-    char filename[13];
+    char filename[FAT32_MAX_FILENAME + 1];
+    char short_name[13];
+    uint8_t has_long_name;
     uint8_t attributes;
     uint32_t size;
     uint32_t cluster;
@@ -135,6 +148,5 @@ uint32_t fat32_get_root_cluster(void);
 uint32_t fat32_cluster_to_sector(uint32_t cluster);
 uint32_t fat32_get_next_cluster(uint32_t cluster);
 int fat32_read_cluster(uint32_t cluster, void* buffer);
-int fat32_parse_dir_entry(fat32_dir_entry_t* entry, fat32_file_info_t* info);
 
 #endif // FAT32_H

@@ -649,9 +649,76 @@ void cmd_rmdir(const char* args) {
     }
 }
 
-// Print text to terminal
+// Print text to terminal or write to file
 void cmd_echo(const char* args) {
-    printf("%s\n", args ? args : "");
+    if (!args || !*args) {
+        printf("\n");
+        return;
+    }
+    
+    // Check for redirection (echo "text" > file)
+    char args_copy[256];
+    strcpy(args_copy, args);
+    
+    char* redirect_pos = strchr(args_copy, '>');
+    if (redirect_pos) {
+        // Split the command - find the > character
+        *redirect_pos = '\0';
+        const char* text = args_copy;
+        const char* filename = redirect_pos + 1;
+        
+        // Remove trailing spaces from text
+        char* text_end = redirect_pos - 1;
+        while (text_end > text && *text_end == ' ') {
+            *text_end = '\0';
+            text_end--;
+        }
+        
+        // Skip leading spaces in filename
+        while (*filename == ' ') filename++;
+        
+        if (!*filename) {
+            printf("echo: missing filename after >\n");
+            return;
+        }
+        
+        // Build full path
+        char path[VFS_MAX_PATH];
+        if (filename[0] != '/') {
+            strcpy(path, vfs_getcwd());
+            if (strcmp(path, "/") != 0) {
+                strcat(path, "/");
+            }
+            strcat(path, filename);
+        } else {
+            strcpy(path, filename);
+        }
+        
+        // Create file if it doesn't exist
+        vfs_create(path);
+        
+        // Open file for writing
+        vfs_file_t file;
+        if (vfs_open(path, &file) != VFS_SUCCESS) {
+            printf("echo: cannot write to '%s'\n", filename);
+            return;
+        }
+        
+        // Write text to file
+        int bytes_written = vfs_write(&file, text, strlen(text));
+        if (bytes_written >= 0) {
+            // Add newline
+            vfs_write(&file, "\n", 1);
+            printf("echo: wrote %d bytes to '%s'\n", bytes_written + 1, filename);
+        } else {
+            printf("echo: failed to write to '%s'\n", filename);
+        }
+        
+        vfs_close(&file);
+    } else {
+        // Regular echo to terminal
+        printf("%s\n", args);
+    }
 }
 
 // Print working directory
@@ -924,7 +991,7 @@ shell_command_t commands[] = {
     { "mkdir",    cmd_mkdir,    "Create a new directory" },
     { "rm",       cmd_rm,       "Remove a file" },
     { "rmdir",    cmd_rmdir,    "Remove a directory" },
-    { "echo",     cmd_echo,     "Print text" },
+    { "echo",     cmd_echo,     "Print text or write to file (echo text > file)" },
     { "pwd",      cmd_pwd,      "Print working directory" },
     { "uptime",   cmd_uptime,   "Show system uptime" },
     { "history",  cmd_history,  "Show command history" },
