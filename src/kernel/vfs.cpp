@@ -1,5 +1,4 @@
 #include "kernel/vfs.h"
-#include "kernel/fat32.h"
 #include "kernel/debug.h"
 #include <stdio.h>
 #include <string.h>
@@ -90,15 +89,16 @@ int vfs_unmount(const char* mountpoint) {
                 }
             }
             
-            // Call filesystem-specific unmount for FAT32
-            if (mounts[i].fs_type == VFS_FS_FAT32) {
-                int result = fat32_unmount();
+            if (mounts[i].ops && mounts[i].ops->unmount) {
+                int result = mounts[i].ops->unmount(&mounts[i]);
                 if (result != 0) {
-                    error("[VFS] Warning: FAT32 unmount returned error %d", result);
+                    error("[VFS] Warning: filesystem unmount returned error %d", result);
                 }
             }
             
             mounts[i].mounted = 0;
+            mounts[i].ops = NULL;
+            mounts[i].fs_data = NULL;
             success("[VFS] Successfully unmounted %s", mountpoint);
             return VFS_SUCCESS;
         }

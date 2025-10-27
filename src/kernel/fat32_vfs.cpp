@@ -109,6 +109,11 @@ static void fat32_vfs_close(vfs_file_t* file) {
     }
 }
 
+static int fat32_vfs_unmount(vfs_mount_t* mount) {
+    (void)mount;
+    return fat32_unmount();
+}
+
 static int fat32_vfs_readdir(vfs_mount_t* mount, const char* path, vfs_dirent_t* entries, int max_entries) {
     (void)mount; // Mount info available if needed
     
@@ -239,6 +244,7 @@ static vfs_operations_t fat32_vfs_ops = {
     .write = fat32_vfs_write,
     .seek = fat32_vfs_seek,
     .close = fat32_vfs_close,
+    .unmount = fat32_vfs_unmount,
     .readdir = fat32_vfs_readdir,
     .mkdir = fat32_vfs_mkdir,
     .rmdir = fat32_vfs_rmdir,

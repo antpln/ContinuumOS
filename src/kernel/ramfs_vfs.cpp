@@ -246,6 +246,7 @@ static vfs_operations_t ramfs_vfs_ops = {
     .write = ramfs_vfs_write,
     .seek = ramfs_vfs_seek,
     .close = ramfs_vfs_close,
+    .unmount = NULL,
     .readdir = ramfs_vfs_readdir,
     .mkdir = ramfs_vfs_mkdir,
     .rmdir = ramfs_vfs_rmdir,
